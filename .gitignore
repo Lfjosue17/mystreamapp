@@ -33,3 +33,13 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Secretos y datos personales (nunca se suben)
+.env
+Claude outputs/
+*.csv
+*.xlsx
+*.xls
+*.pem
+*.p12
+*.key

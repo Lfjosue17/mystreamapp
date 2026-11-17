@@ -1,0 +1,16 @@
+# Finales de línea de Windows (CRLF) para los archivos de texto
+* text=auto eol=crlf
+
+# Scripts de Linux/Mac deben quedarse con LF
+gradlew text eol=lf
+*.sh text eol=lf
+
+# Archivos binarios
+*.png binary
+*.jpg binary
+*.webp binary
+*.jar binary
+*.jks binary
+*.keystore binary
+*.apk binary
+*.aab binary
