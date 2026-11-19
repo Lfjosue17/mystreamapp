@@ -1,5 +1,20 @@
 # Cambios
 
+## [0.3.0] - 2026-11-19
+
+### Agregado
+- Motor de proveedores configurable por JSON (Ajustes → Motor de proveedores): reglas de extracción
+  (Jsoup/Regex, pasos encadenados) sin recompilar la app, con Media Sniffer (WebView oculto) para
+  sitios que generan el enlace con JavaScript.
+- Servidor remoto opcional (Ajustes → Servidor remoto): conecta tu propio TMDB-Embed-API (URL + API Key)
+  para sumar sus fuentes a las del motor local.
+- "Ver" ahora consulta el motor local y el servidor remoto, combina los resultados con tus plantillas
+  de Fuentes y los ordena por idioma (español latino → España → subtitulado/original).
+
+### Cambiado
+- El puente nativo (`Puente.kt`) expone `consultarProveedor`/`validarProveedores` en vez de la función
+  anterior `buscarFuentes`.
+
 ## [0.2.0] - 2026-11-17
 
 ### Agregado

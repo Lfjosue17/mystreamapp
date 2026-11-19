@@ -7,13 +7,25 @@ import java.net.URL
 import java.net.URLEncoder
 
 /**
- * Cliente HTTP hacia tu instancia de TMDB-Embed-API (Parte B, servidor propio).
- * Manda la API Key en cabeceras y espera un JSON con las fuentes, ya en la
- * misma forma que usa el resto del motor: `{ providerName, url, headers,
- * language, subtitles, score }`.
+ * Cliente HTTP hacia tu instancia real de TMDB-Embed-API (Parte B).
+ * Llama al endpoint agregado `GET /api/streams/:type/:tmdbId` (devuelve las
+ * fuentes de TODOS los proveedores habilitados ya combinadas), mandando la
+ * API Key en la cabecera `X-API-Key` (ver `utils/auth.js` → `requireApiKey`
+ * en el servidor).
  *
- * El endpoint y la forma exacta de la respuesta son un punto de partida: hay
- * que ajustarlos cuando definamos el contrato de la Parte B.
+ * `:type` ahí solo acepta "movie" o "series" (no "anime"): el anime se manda
+ * como "series". Nota: para anime, `info.tmdb` en realidad trae el ID de
+ * MyAnimeList (así lo manda `ver()` en app.js), no un ID de TMDB, así que el
+ * servidor normalmente no encontrará nada para esa categoría salvo que tú
+ * mismo agregues un proveedor que entienda ese ID.
+ *
+ * Forma de cada resultado en `streams[]` (ver README.md del servidor,
+ * "Stream Object Schema"): `{ name, title, url, quality, provider, headers,
+ * subtitles: [{url, lang}] }`. Los campos `language` (código corto, ej.
+ * "es-419") y `originalSubtitled` (true/false) son una convención agregada
+ * para ordenar por idioma (ver `utils/languageSort.js` del servidor); son
+ * opcionales, así que un proveedor que no los declare simplemente queda al
+ * final del orden.
  */
 class ClienteEmbed(
     private val urlBase: String,
@@ -21,18 +33,12 @@ class ClienteEmbed(
 ) : MotorProveedor {
 
     override suspend fun buscar(info: InfoContenido): List<ResultadoProveedor> {
-        if (urlBase.isBlank() || apiKey.isBlank()) return emptyList()
+        if (urlBase.isBlank() || apiKey.isBlank() || info.tmdb.isBlank()) return emptyList()
         val base = urlBase.trimEnd('/')
-        val q = buildString {
-            append("tipo=").append(URLEncoder.encode(info.tipo, "UTF-8"))
-            append("&tmdb=").append(URLEncoder.encode(info.tmdb, "UTF-8"))
-            if (info.tipo != "movie") {
-                append("&temporada=").append(info.temporada)
-                append("&episodio=").append(info.episodio)
-            }
-            if (info.mal.isNotBlank()) append("&mal=").append(URLEncoder.encode(info.mal, "UTF-8"))
-        }
-        val conexion = (URL("$base/api/fuentes?$q").openConnection() as HttpURLConnection).apply {
+        val tipo = if (info.tipo == "movie") "movie" else "series"
+        val id = URLEncoder.encode(info.tmdb, "UTF-8")
+        val q = if (tipo == "series") "?season=${info.temporada}&episode=${info.episodio}" else ""
+        val conexion = (URL("$base/api/streams/$tipo/$id$q").openConnection() as HttpURLConnection).apply {
             connectTimeout = 10_000
             readTimeout = 20_000
             setRequestProperty("X-API-Key", apiKey)
@@ -51,21 +57,23 @@ class ClienteEmbed(
 
     private fun parsear(texto: String): List<ResultadoProveedor> {
         val raiz = JSONObject(texto)
-        val arr: JSONArray = raiz.optJSONArray("fuentes") ?: return emptyList()
+        if (!raiz.optBoolean("success", false)) return emptyList()
+        val arr: JSONArray = raiz.optJSONArray("streams") ?: return emptyList()
         return (0 until arr.length()).mapNotNull { i ->
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
             val url = o.optString("url").takeIf { it.isNotBlank() } ?: return@mapNotNull null
             val idioma = o.optString("language")
-            val subtitulado = o.optBoolean("subtitles", false)
+            val subtitulado = o.optBoolean("originalSubtitled", false)
             val cabeceras = mutableMapOf<String, String>()
             o.optJSONObject("headers")?.let { h -> h.keys().forEach { k -> cabeceras[k] = h.optString(k) } }
+            val nombre = o.optString("name").ifBlank { o.optString("provider") }.ifBlank { "Servidor remoto" }
             ResultadoProveedor(
-                providerName = o.optString("providerName", "Mi servidor"),
+                providerName = nombre,
                 url = url,
                 headers = cabeceras,
                 language = idioma,
                 subtitles = subtitulado,
-                score = o.optDouble("score", 0.0).let { if (it > 0) it else puntajeIdioma(idioma, subtitulado).toDouble() }
+                score = puntajeIdioma(idioma, subtitulado).toDouble()
             )
         }
     }
