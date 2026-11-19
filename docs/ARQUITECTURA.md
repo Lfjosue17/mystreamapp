@@ -70,6 +70,24 @@ La app tiene dos partes:
   iframe sin ventanas emergentes); video → reproductor nativo.
 - Modo TV: `html.tv`; menú lateral: `html.riel` (TV o pantalla de 900 px o más).
 
+## Motor de proveedores (`proveedores/`)
+
+Paquete nuevo, en construcción: busca fuentes de video para películas, series y
+anime con varios "motores" que comparten la interfaz `MotorProveedor`:
+
+| Archivo | Qué hace |
+|---|---|
+| `MotorProveedor.kt` | Contrato común (`soporta`, `buscar`). |
+| `ProveedorPlantilla.kt` | Las 3 plantillas de hoy (Ajustes → Fuentes), como una implementación más. |
+| `ReglasJson.kt` / `ProveedorJson.kt` | Motor genérico configurable por JSON (Jsoup + Regex), sin recompilar. Ver `docs/PROVEEDORES.md`. |
+| `Sniffer.kt` | WebView oculto que detecta enlaces de video generados por JavaScript. |
+| `ClienteEmbed.kt` | Cliente HTTP hacia un servidor TMDB-Embed-API propio (opcional). |
+| `RepositorioProveedores.kt` | Junta todos los proveedores configurados y les pregunta en paralelo. |
+
+Se llama desde la web con `Nativo.buscarFuentes(id, infoJson)` → responde a
+`App.motores._fin(id, ok, fuentesJson)`. Por ahora solo existe el lado Kotlin;
+falta conectar Ajustes y la pantalla "Ver" en la interfaz web.
+
 ## Versiones
 
 `app/build.gradle.kts` → `versionCode` (+1 en cada entrega) y `versionName` (`X.Y.Z`). Ver `CHANGELOG.md`.

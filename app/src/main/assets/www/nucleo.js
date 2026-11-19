@@ -75,6 +75,38 @@ window.App = window.App || {};
   };
 
   // -------------------------------------------------------------------
+  // Proveedores HTML configurables (Kotlin/Jsoup en Android)
+  // -------------------------------------------------------------------
+  const pendientesProveedor = {};
+  let contadorProveedor = 0;
+  App.proveedores = {
+    async buscar(id, parametros) {
+      if (!N || !N.consultarProveedor) throw new Error('El motor local de proveedores solo está disponible en Android');
+      return new Promise((ok, mal) => {
+        const callbackId = 'p' + (++contadorProveedor);
+        pendientesProveedor[callbackId] = { ok, mal };
+        N.consultarProveedor(id, JSON.stringify(parametros || {}), callbackId);
+      });
+    },
+    async buscarCategoria(categoria, parametros) {
+      const config = App.config.obtener().proveedores || { providers: [] };
+      const lista = (config.providers || []).filter(x => x && x.enabled !== false && x.category === categoria);
+      const resultados = await Promise.all(lista.map(async x => {
+        try { return await App.proveedores.buscar(x.id, parametros); }
+        catch (e) { console.warn('Proveedor ' + x.id + ': ' + e.message); return []; }
+      }));
+      return resultados.flat().sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+    },
+    _fin(id, exito, contenido) {
+      const p = pendientesProveedor[id];
+      if (!p) return;
+      delete pendientesProveedor[id];
+      if (!exito) { p.mal(new Error(contenido || 'Error del proveedor')); return; }
+      try { p.ok(JSON.parse(contenido)); } catch (e) { p.mal(new Error('Respuesta del proveedor no válida')); }
+    }
+  };
+
+  // -------------------------------------------------------------------
   // Configuración (listas, fuentes, claves)
   // -------------------------------------------------------------------
   let configMem = null;
@@ -84,6 +116,7 @@ window.App = window.App || {};
       const guardada = App.datos.leer('config', null);
       configMem = Object.assign(copia(App.PREDETERMINADO), guardada || {});
       ['listasCanales', 'agendas', 'fuentes'].forEach(k => { if (!Array.isArray(configMem[k])) configMem[k] = []; });
+      if (!configMem.proveedores || typeof configMem.proveedores !== 'object') configMem.proveedores = { version: 1, providers: [] };
       if (!guardada) App.datos.guardar('config', configMem);
       return configMem;
     },

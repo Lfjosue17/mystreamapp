@@ -99,9 +99,9 @@
     url = urlSegura(url);
     if (!url) return aviso('Este enlace no es válido');
     if (/(^|\.)youtube\.com|youtu\.be/i.test(url)) return abrirExterno(url);
-    const web = op.tipo === 'fuente' ? !esVideoDirecto(url) : esPaginaWeb(url);
+    const web = op.tipo === 'direct' ? false : (op.tipo === 'fuente' ? !esVideoDirecto(url) : esPaginaWeb(url));
     if (web) return abrirMarco(url, titulo);
-    const cab = {};
+    const cab = Object.assign({}, op.headers || {});
     if (op.ua) cab['User-Agent'] = op.ua;
     if (op.referer) cab.Referer = op.referer;
     if (App.nativo && App.nativo.reproducir) App.nativo.reproducir(url, titulo || '', JSON.stringify(cab));
@@ -453,26 +453,46 @@
     return String(texto).replace(/\{(tmdb|imdb|mal|temporada|episodio|titulo|tipo)\}/g, (_, k) => encodeURIComponent(valores[k]));
   }
 
-  function ver(info) {
+  async function ver(info) {
     const campo = info.tipo === 'movie' ? 'pelicula' : (info.tipo === 'anime' ? 'anime' : 'serie');
+    const categoria = info.tipo === 'movie' ? 'movie' : (info.tipo === 'anime' ? 'anime' : 'series');
     const nombreTipo = info.tipo === 'movie' ? 'películas' : (info.tipo === 'anime' ? 'anime' : 'series');
-    const fuentes = App.config.obtener().fuentes.filter(f => f.activa !== false && f[campo]);
-    if (!fuentes.length) {
-      return abrirModal('<h3>No tienes fuentes</h3><p>Para ver ' + nombreTipo +
-        ' agrega una fuente en <b>Ajustes → Fuentes</b> (con enlace de ' + nombreTipo + ').</p>' +
+    const config = App.config.obtener();
+    const plantillas = config.fuentes.filter(f => f.activa !== false && f[campo]);
+    const definiciones = (config.proveedores && config.proveedores.providers || [])
+      .filter(x => x && x.enabled !== false && x.category === categoria);
+    const directas = [];
+    if (definiciones.length && App.nativo && App.nativo.consultarProveedor) {
+      abrirModal('<h3>Buscando fuentes…</h3><p>Consultando proveedores locales.</p>');
+      const parametros = {
+        tmdb: info.id, imdb: info.imdb || '', mal: info.mal || (info.tipo === 'anime' ? info.id : ''),
+        season: info.temporada || 1, episode: info.episodio || 1, title: info.titulo || '', type: categoria
+      };
+      const respuestas = await App.proveedores.buscarCategoria(categoria, parametros);
+      respuestas.forEach(f => directas.push({
+        _direct: true, nombre: f.providerName + ' · ' + (f.language || 'Idioma no identificado'),
+        url: f.url, headers: f.headers || {}, language: f.language, subtitles: !!f.subtitles, score: Number(f.score || 0)
+      }));
+      directas.sort((a, b) => b.score - a.score);
+    }
+    const opciones = directas.concat(plantillas);
+    if (!opciones.length) {
+      return abrirModal('<h3>No tienes fuentes</h3><p>No se encontraron fuentes directas y tampoco tienes plantillas para ' + nombreTipo + '. Agrega proveedores en <b>Ajustes → Motor de proveedores</b> o plantillas en <b>Ajustes → Fuentes</b>.</p>' +
         '<div class="acciones"><button class="btn foco" data-accion="ir" data-a="ajustes">Ir a Ajustes</button>' +
         '<button class="btn sec foco" data-accion="cerrar-modal">Cerrar</button></div>');
     }
     const abrir = f => {
       const conEp = info.tipo === 'tv' || info.tipo === 'anime';
-      const etiqueta = conEp ? info.titulo + ' · E' + info.episodio : info.titulo;
-      App.reproducir(plantilla(f[campo], info), etiqueta, { tipo: 'fuente' });
+      const etiqueta = (conEp ? info.titulo + ' · E' + info.episodio : info.titulo) + (f.language ? ' · ' + f.language : '');
+      if (f._direct) App.reproducir(f.url, etiqueta, { tipo: 'direct', headers: f.headers });
+      else App.reproducir(plantilla(f[campo], info), etiqueta, { tipo: 'fuente' });
       if (conEp && estadoDetalle) registrarReciente(Object.assign({}, estadoDetalle.item, { temporada: info.temporada, episodio: info.episodio }));
     };
-    if (fuentes.length === 1) { cerrarModal(); return abrir(fuentes[0]); }
-    opcionesVer = { info, fuentes, abrir };
+    cerrarModal();
+    if (opciones.length === 1) return abrir(opciones[0]);
+    opcionesVer = { info, fuentes: opciones, abrir };
     abrirModal('<h3>Elige una fuente</h3><div class="lista-opciones">' +
-      fuentes.map((f, i) => '<button class="opcion foco" data-accion="usar-fuente" data-i="' + i + '">▶ ' + esc(f.nombre) + '</button>').join('') +
+      opciones.map((f, i) => '<button class="opcion foco" data-accion="usar-fuente" data-i="' + i + '">▶ ' + esc(f.nombre || f.providerName) + '</button>').join('') +
       '</div><div class="acciones"><button class="btn sec foco" data-accion="cerrar-modal">Cancelar</button></div>');
   }
 
@@ -788,6 +808,14 @@
       html += '<section class="panel"><h2>' + info.titulo + '</h2><p>' + info.ayuda + '</p>' + items + form + '</section>';
     });
 
+    const configProveedores = c.proveedores || { version: 1, providers: [] };
+    html += '<section class="panel"><h2>Motor de proveedores (JSON)</h2>' +
+      '<p>Configura extractores HTML locales. Admite selectores CSS de Jsoup o expresiones Regex. Devuelve únicamente enlaces directos HLS/DASH/MP4; no modifica tus listas M3U, agendas deportivas ni plantillas actuales.</p>' +
+      '<label class="campo">Configuración JSON<textarea id="json-proveedores" spellcheck="false" rows="12">' + esc(JSON.stringify(configProveedores, null, 2)) + '</textarea></label>' +
+      '<div class="acciones"><button class="btn foco" data-accion="guardar-proveedores">Validar y guardar proveedores</button>' +
+      '<button class="btn sec foco" data-accion="plantilla-proveedores">Cargar plantilla vacía</button></div>' +
+      '<p class="nota">Los cambios se guardan en el almacenamiento privado del dispositivo y no requieren recompilar la APK. Para ejecutar extractores se necesita conexión a Internet.</p></section>';
+
     html += '<section class="panel"><h2>Respaldo</h2><p>Copia este texto para guardar tus listas y fuentes, o pega uno para restaurarlas.</p>' +
       '<label class="campo"><textarea id="respaldo" spellcheck="false">' + esc(JSON.stringify(c, null, 2)) + '</textarea></label>' +
       '<div class="acciones"><button class="btn sec foco" data-accion="importar">Importar lo pegado</button>' +
@@ -964,6 +992,26 @@
             aviso('Funciona: ' + n + ' eventos');
           }
         } catch (err) { aviso('No funcionó: ' + err.message); }
+        break;
+      }
+      case 'guardar-proveedores': {
+        try {
+          const nuevo = JSON.parse($('#json-proveedores').value);
+          if (!nuevo || nuevo.version !== 1 || !Array.isArray(nuevo.providers)) throw new Error('Se requiere { version: 1, providers: [] }');
+          if (App.nativo && App.nativo.validarProveedores) {
+            const validacion = App.nativo.validarProveedores(JSON.stringify(nuevo));
+            if (String(validacion).startsWith('ERROR:')) throw new Error(validacion.replace(/^ERROR:\s*/, ''));
+          }
+          c.proveedores = nuevo;
+          App.config.guardar(c);
+          aviso('Proveedores guardados: ' + nuevo.providers.length);
+          repintar();
+        } catch (err) { aviso('JSON no válido: ' + err.message); }
+        break;
+      }
+      case 'plantilla-proveedores': {
+        $('#json-proveedores').value = JSON.stringify({ version:  1, providers: [] }, null, 2);
+        aviso('Plantilla vacía cargada; guarda para aplicarla');
         break;
       }
       case 'importar': {

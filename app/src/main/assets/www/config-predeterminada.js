@@ -34,5 +34,8 @@ App.PREDETERMINADO = {
   // ({mal} = ID de MyAnimeList, para la fuente de anime)
   fuentes: [
     // { id: 'mi-fuente', nombre: 'Mi servidor', pelicula: 'https://…/{tmdb}', serie: 'https://…/{tmdb}/{temporada}/{episodio}', anime: 'https://…/{mal}/{episodio}', activa: true }
-  ]
+  ],
+
+  // Proveedores HTML configurables (motor Kotlin + Jsoup). No reemplaza M3U ni agendas JSON.
+  proveedores: { version: 1, providers: [] }
 };

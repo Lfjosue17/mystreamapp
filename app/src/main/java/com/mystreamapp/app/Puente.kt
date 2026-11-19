@@ -11,6 +11,15 @@ import android.net.Uri
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.Toast
+import com.mystreamapp.app.proveedores.FuenteEncontrada
+import com.mystreamapp.app.proveedores.InfoContenido
+import com.mystreamapp.app.proveedores.RepositorioProveedores
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -28,6 +37,9 @@ class Puente(private val act: Activity, private val web: WebView) {
 
     private val hilos = Executors.newFixedThreadPool(4)
     private val carpeta = File(act.filesDir, "datos").apply { mkdirs() }
+
+    // Para el motor de proveedores (Etapa 1/2): corre en segundo plano (IO).
+    private val alcance = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // ---------------- Guardado local ----------------
 
@@ -152,6 +164,66 @@ class Puente(private val act: Activity, private val web: WebView) {
     @JavascriptInterface
     fun abrirExterno(url: String) {
         act.runOnUiThread { abrirFuera(act, Uri.parse(url)) }
+    }
+
+    // ---------------- Proveedores de video (Etapa 1 y 2) ----------------
+
+    /**
+     * Busca fuentes de video para una película/serie/anime usando todos los
+     * proveedores configurados (plantillas de hoy, motores JSON y tu servidor
+     * remoto, si está activo). Responde a `App.motores._fin(id, ok, fuentesJson)`
+     * en la interfaz web; `fuentesJson` es un arreglo de objetos con
+     * nombre/url/ua/referer/idioma/calidad/origen.
+     *
+     * Nota: todavía no hay nada en app.js que llame esta función ni pantallas en
+     * Ajustes para configurar `proveedoresJson` o `servidorRemoto`; eso se conecta
+     * en el siguiente paso.
+     */
+    @JavascriptInterface
+    fun buscarFuentes(id: String, infoJson: String) {
+        alcance.launch {
+            val (ok, resultado) = try {
+                val info = infoDesdeJson(infoJson)
+                val config = JSONObject(leer("config") ?: "{}")
+                val fuentes = RepositorioProveedores(act).buscar(info, config)
+                true to fuentesAJson(fuentes)
+            } catch (e: Exception) {
+                false to (e.message ?: e.javaClass.simpleName)
+            }
+            val js = "App.motores._fin(${JSONObject.quote(id)}, $ok, ${JSONObject.quote(resultado)})"
+            withContext(Dispatchers.Main) { web.evaluateJavascript(js, null) }
+        }
+    }
+
+    private fun infoDesdeJson(json: String): InfoContenido {
+        val o = JSONObject(json)
+        return InfoContenido(
+            tipo = o.optString("tipo", "movie"),
+            tmdb = o.optString("tmdb"),
+            imdb = o.optString("imdb"),
+            mal = o.optString("mal"),
+            temporada = o.optInt("temporada", 1),
+            episodio = o.optInt("episodio", 1),
+            titulo = o.optString("titulo")
+        )
+    }
+
+    private fun fuentesAJson(fuentes: List<FuenteEncontrada>): String {
+        val arr = JSONArray()
+        fuentes.forEach { f ->
+            arr.put(
+                JSONObject().apply {
+                    put("nombre", f.nombre)
+                    put("url", f.url)
+                    put("ua", f.ua)
+                    put("referer", f.referer)
+                    put("idioma", f.idioma)
+                    put("calidad", f.calidad)
+                    put("origen", f.origen)
+                }
+            )
+        }
+        return arr.toString()
     }
 
     companion object {
