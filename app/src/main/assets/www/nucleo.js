@@ -80,6 +80,9 @@ window.App = window.App || {};
   const pendientesProveedor = {};
   let contadorProveedor = 0;
   App.proveedores = {
+    // Id reservado: cuando está presente, Kotlin consulta tu servidor
+    // remoto (TMDB-Embed-API) en vez de una regla JSON local.
+    ID_SERVIDOR_REMOTO: 'servidor-remoto',
     async buscar(id, parametros) {
       if (!N || !N.consultarProveedor) throw new Error('El motor local de proveedores solo está disponible en Android');
       return new Promise((ok, mal) => {
@@ -89,11 +92,17 @@ window.App = window.App || {};
       });
     },
     async buscarCategoria(categoria, parametros) {
-      const config = App.config.obtener().proveedores || { providers: [] };
-      const lista = (config.providers || []).filter(x => x && x.enabled !== false && x.category === categoria);
-      const resultados = await Promise.all(lista.map(async x => {
-        try { return await App.proveedores.buscar(x.id, parametros); }
-        catch (e) { console.warn('Proveedor ' + x.id + ': ' + e.message); return []; }
+      const c = App.config.obtener();
+      const config = c.proveedores || { providers: [] };
+      const ids = (config.providers || [])
+        .filter(x => x && x.enabled !== false && x.category === categoria)
+        .map(x => x.id);
+      if (c.servidorRemoto && c.servidorRemoto.activo && (c.servidorRemoto.url || '').trim()) {
+        ids.push(App.proveedores.ID_SERVIDOR_REMOTO);
+      }
+      const resultados = await Promise.all(ids.map(async id => {
+        try { return await App.proveedores.buscar(id, parametros); }
+        catch (e) { console.warn('Proveedor ' + id + ': ' + e.message); return []; }
       }));
       return resultados.flat().sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
     },
@@ -117,6 +126,7 @@ window.App = window.App || {};
       configMem = Object.assign(copia(App.PREDETERMINADO), guardada || {});
       ['listasCanales', 'agendas', 'fuentes'].forEach(k => { if (!Array.isArray(configMem[k])) configMem[k] = []; });
       if (!configMem.proveedores || typeof configMem.proveedores !== 'object') configMem.proveedores = { version: 1, providers: [] };
+      if (!configMem.servidorRemoto || typeof configMem.servidorRemoto !== 'object') configMem.servidorRemoto = { activo: false, url: '', apiKey: '' };
       if (!guardada) App.datos.guardar('config', configMem);
       return configMem;
     },

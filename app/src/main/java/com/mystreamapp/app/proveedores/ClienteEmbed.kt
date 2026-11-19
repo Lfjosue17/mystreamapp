@@ -8,8 +8,9 @@ import java.net.URLEncoder
 
 /**
  * Cliente HTTP hacia tu instancia de TMDB-Embed-API (Parte B, servidor propio).
- * Manda la API Key en cabeceras y espera un JSON con las fuentes, ya separadas
- * y ordenadas por idioma por el servidor.
+ * Manda la API Key en cabeceras y espera un JSON con las fuentes, ya en la
+ * misma forma que usa el resto del motor: `{ providerName, url, headers,
+ * language, subtitles, score }`.
  *
  * El endpoint y la forma exacta de la respuesta son un punto de partida: hay
  * que ajustarlos cuando definamos el contrato de la Parte B.
@@ -19,11 +20,8 @@ class ClienteEmbed(
     private val apiKey: String
 ) : MotorProveedor {
 
-    override val nombre: String = "Mi servidor"
-
-    override fun soporta(info: InfoContenido): Boolean = urlBase.isNotBlank() && apiKey.isNotBlank()
-
-    override suspend fun buscar(info: InfoContenido): List<FuenteEncontrada> {
+    override suspend fun buscar(info: InfoContenido): List<ResultadoProveedor> {
+        if (urlBase.isBlank() || apiKey.isBlank()) return emptyList()
         val base = urlBase.trimEnd('/')
         val q = buildString {
             append("tipo=").append(URLEncoder.encode(info.tipo, "UTF-8"))
@@ -51,20 +49,23 @@ class ClienteEmbed(
         }
     }
 
-    private fun parsear(texto: String): List<FuenteEncontrada> {
+    private fun parsear(texto: String): List<ResultadoProveedor> {
         val raiz = JSONObject(texto)
         val arr: JSONArray = raiz.optJSONArray("fuentes") ?: return emptyList()
         return (0 until arr.length()).mapNotNull { i ->
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
             val url = o.optString("url").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            FuenteEncontrada(
-                nombre = o.optString("nombre", nombre),
+            val idioma = o.optString("language")
+            val subtitulado = o.optBoolean("subtitles", false)
+            val cabeceras = mutableMapOf<String, String>()
+            o.optJSONObject("headers")?.let { h -> h.keys().forEach { k -> cabeceras[k] = h.optString(k) } }
+            ResultadoProveedor(
+                providerName = o.optString("providerName", "Mi servidor"),
                 url = url,
-                ua = o.optString("ua"),
-                referer = o.optString("referer"),
-                idioma = o.optString("idioma"),
-                calidad = o.optString("calidad"),
-                origen = nombre
+                headers = cabeceras,
+                language = idioma,
+                subtitles = subtitulado,
+                score = o.optDouble("score", 0.0).let { if (it > 0) it else puntajeIdioma(idioma, subtitulado).toDouble() }
             )
         }
     }

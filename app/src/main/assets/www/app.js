@@ -461,8 +461,9 @@
     const plantillas = config.fuentes.filter(f => f.activa !== false && f[campo]);
     const definiciones = (config.proveedores && config.proveedores.providers || [])
       .filter(x => x && x.enabled !== false && x.category === categoria);
+    const srActivo = !!(config.servidorRemoto && config.servidorRemoto.activo && (config.servidorRemoto.url || '').trim());
     const directas = [];
-    if (definiciones.length && App.nativo && App.nativo.consultarProveedor) {
+    if ((definiciones.length || srActivo) && App.nativo && App.nativo.consultarProveedor) {
       abrirModal('<h3>Buscando fuentes…</h3><p>Consultando proveedores locales.</p>');
       const parametros = {
         tmdb: info.id, imdb: info.imdb || '', mal: info.mal || (info.tipo === 'anime' ? info.id : ''),
@@ -816,6 +817,15 @@
       '<button class="btn sec foco" data-accion="plantilla-proveedores">Cargar plantilla vacía</button></div>' +
       '<p class="nota">Los cambios se guardan en el almacenamiento privado del dispositivo y no requieren recompilar la APK. Para ejecutar extractores se necesita conexión a Internet.</p></section>';
 
+    const sr = c.servidorRemoto || { activo: false, url: '', apiKey: '' };
+    html += '<section class="panel"><h2>Servidor remoto (opcional)</h2>' +
+      '<p>Conecta tu propio servidor (TMDB-Embed-API) para sumar sus fuentes a las del motor local; se combinan y se ordenan igual, por idioma. No es necesario para que la app funcione.</p>' +
+      '<form class="formulario" data-form="servidorRemoto" style="border:0;margin:0;padding:0">' +
+      '<label class="campo" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="activo"' + (sr.activo ? ' checked' : '') + '> Activar servidor remoto</label>' +
+      '<label class="campo">URL del servidor<input name="url" inputmode="url" autocomplete="off" value="' + esc(sr.url) + '" placeholder="https://tu-servidor.ejemplo.com"></label>' +
+      '<label class="campo">API Key<input name="apiKey" autocomplete="off" value="' + esc(sr.apiKey) + '" placeholder="Tu clave"></label>' +
+      '<div class="acciones"><button class="btn foco" type="submit">Guardar servidor remoto</button></div></form></section>';
+
     html += '<section class="panel"><h2>Respaldo</h2><p>Copia este texto para guardar tus listas y fuentes, o pega uno para restaurarlas.</p>' +
       '<label class="campo"><textarea id="respaldo" spellcheck="false">' + esc(JSON.stringify(c, null, 2)) + '</textarea></label>' +
       '<div class="acciones"><button class="btn sec foco" data-accion="importar">Importar lo pegado</button>' +
@@ -839,6 +849,15 @@
       c.region = (val('region') || 'HN').toUpperCase();
       App.config.guardar(c);
       aviso('Claves guardadas');
+      return repintar();
+    }
+    if (tipo === 'servidorRemoto') {
+      const activo = !!f.get('activo');
+      const url = val('url');
+      if (activo && !urlSegura(url)) return aviso('Pon una URL que empiece con http para activar el servidor remoto');
+      c.servidorRemoto = { activo, url, apiKey: val('apiKey') };
+      App.config.guardar(c);
+      aviso('Servidor remoto guardado');
       return repintar();
     }
     const nuevo = { id: App.nuevoId(), nombre: val('nombre'), activa: true };

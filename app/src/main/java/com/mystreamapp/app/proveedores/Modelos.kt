@@ -1,11 +1,12 @@
 package com.mystreamapp.app.proveedores
 
 /**
- * Lo que se quiere ver. Viene de la ficha (TMDB/Jikan) en la interfaz web,
- * con los mismos datos que hoy usa `plantilla()` en app.js.
+ * Lo que se quiere ver. Viene de los `parametros` que ya manda `ver()` en
+ * app.js a `Nativo.consultarProveedor(id, parametros, callbackId)`:
+ * `{ tmdb, imdb, mal, season, episode, title, type }`.
  */
 data class InfoContenido(
-    val tipo: String,              // "movie" | "tv" | "anime"
+    val tipo: String,              // "movie" | "series" | "anime" (igual que "category")
     val tmdb: String = "",
     val imdb: String = "",
     val mal: String = "",
@@ -13,7 +14,7 @@ data class InfoContenido(
     val episodio: Int = 1,
     val titulo: String = ""
 ) {
-    /** Comodines disponibles para plantillas de URL y reglas JSON. */
+    /** Comodines disponibles en las URLs de `pasos` (ver docs/PROVEEDORES.md). */
     fun comodines(): Map<String, String> = mapOf(
         "tmdb" to tmdb,
         "imdb" to imdb,
@@ -21,23 +22,22 @@ data class InfoContenido(
         "temporada" to temporada.toString(),
         "episodio" to episodio.toString(),
         "titulo" to titulo,
-        "tipo" to when (tipo) {
-            "movie" -> "pelicula"
-            "anime" -> "anime"
-            else -> "serie"
-        }
+        "tipo" to tipo
     )
 }
 
-/** Un enlace de video encontrado, listo para App.reproducir / ReproductorActivity. */
-data class FuenteEncontrada(
-    val nombre: String,
+/**
+ * Un enlace de video encontrado. La forma es la que ya espera `ver()` en
+ * app.js para cada resultado: `{ providerName, url, headers, language,
+ * subtitles, score }`.
+ */
+data class ResultadoProveedor(
+    val providerName: String,
     val url: String,
-    val ua: String = "",
-    val referer: String = "",
-    val idioma: String = "",   // "es-LA", "es-ES", "und" = idioma original
-    val calidad: String = "",
-    val origen: String = ""
+    val headers: Map<String, String> = emptyMap(),
+    val language: String = "",
+    val subtitles: Boolean = false,
+    val score: Double = 0.0
 )
 
 /**
@@ -60,3 +60,19 @@ internal fun codificarURI(texto: String): String {
 /** true si la URL parece un video directo (m3u8/mpd/mp4/...) y no una página web. */
 internal fun esVideoDirecto(url: String): Boolean =
     Regex("\\.(m3u8|mpd|mp4|mkv|webm|ts)(\\?|#|$)", RegexOption.IGNORE_CASE).containsMatchIn(url)
+
+/**
+ * Puntaje por defecto según idioma, para que "Elige una fuente" ordene con
+ * español latino primero, luego español de España, y el idioma original
+ * subtitulado como alternativa. Un proveedor puede fijar su propio `score`
+ * en el JSON para no depender de esto.
+ */
+internal fun puntajeIdioma(idioma: String, subtitulado: Boolean): Int {
+    val i = idioma.trim().lowercase()
+    return when {
+        i == "es-es" || i == "es_es" || i == "es-esp" -> 70
+        i.startsWith("es") -> 100   // es, es-la, es-419, es-mx, es-ar... (español ≠ España)
+        subtitulado -> 40            // idioma original con subtítulos
+        else -> 10
+    }
+}

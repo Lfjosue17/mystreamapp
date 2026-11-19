@@ -5,9 +5,8 @@ import org.jsoup.Jsoup
 import java.util.regex.Pattern
 
 /**
- * Motor genérico (Etapa 2): ejecuta los pasos de [ReglasProveedor] con Jsoup
- * (selectores CSS) y/o Regex, sin tener que recompilar la app. Cada paso puede
- * pedir una URL nueva y/o extraer valores del HTML más reciente.
+ * Motor genérico: ejecuta los `pasos` de un [ReglasProveedor] con Jsoup
+ * (selectores CSS) y/o Regex, sin tener que recompilar la app.
  *
  * Si el resultado final no es un video directo y `usarSniffer` está activo,
  * se pasa por [Sniffer] para conseguir el enlace real antes de devolverlo.
@@ -17,23 +16,17 @@ class ProveedorJson(
     private val act: Activity
 ) : MotorProveedor {
 
-    override val nombre: String get() = reglas.nombre
-
-    override fun soporta(info: InfoContenido): Boolean =
-        reglas.activo && tipoDe(info)?.pasos?.isNotEmpty() == true
-
-    override suspend fun buscar(info: InfoContenido): List<FuenteEncontrada> {
-        val pasos = tipoDe(info)?.pasos ?: return emptyList()
-        if (pasos.isEmpty()) return emptyList()
+    override suspend fun buscar(info: InfoContenido): List<ResultadoProveedor> {
+        if (!reglas.enabled || reglas.pasos.isEmpty()) return emptyList()
 
         val comodines = info.comodines().toMutableMap()
         var html: String? = null
         var resultados = listOf<String>()
 
-        for (paso in pasos) {
+        for (paso in reglas.pasos) {
             if (paso.url != null) {
                 comodines["anterior"] = resultados.firstOrNull() ?: ""
-                val url = ProveedorPlantilla.rellenar(paso.url, comodines)
+                val url = rellenar(paso.url, comodines)
                 html = try {
                     Jsoup.connect(url).apply {
                         reglas.cabeceras.forEach { (k, v) -> header(k, v) }
@@ -56,25 +49,28 @@ class ProveedorJson(
         }
 
         if (resultados.isEmpty()) return emptyList()
-        val ultimoPaso = pasos.last()
+        val ultimoPaso = reglas.pasos.last()
         val finales = if (ultimoPaso.todos) resultados else resultados.take(1)
+        val puntaje = if (reglas.score > 0) reglas.score else puntajeIdioma(reglas.language, reglas.subtitles).toDouble()
+        val nombre = reglas.nombre.ifBlank { reglas.id }
 
-        val fuentes = finales.mapIndexed { i, u ->
-            FuenteEncontrada(
-                nombre = if (finales.size > 1) "${reglas.nombre} ${i + 1}" else reglas.nombre,
-                url = u,
-                ua = reglas.cabeceras["User-Agent"] ?: "",
-                referer = reglas.cabeceras["Referer"] ?: "",
-                origen = reglas.nombre
+        return finales.map { u ->
+            var urlFinal = u
+            var cabecerasFinal = reglas.cabeceras
+            if (reglas.usarSniffer && !esVideoDirecto(u)) {
+                Sniffer.buscar(act, u, reglas.cabeceras)?.let {
+                    urlFinal = it.url
+                    cabecerasFinal = it.headers
+                }
+            }
+            ResultadoProveedor(
+                providerName = nombre,
+                url = urlFinal,
+                headers = cabecerasFinal,
+                language = reglas.language,
+                subtitles = reglas.subtitles,
+                score = puntaje
             )
-        }
-
-        if (!reglas.usarSniffer) return fuentes
-
-        // Si hace falta, cada enlace que no sea video directo se resuelve con el Sniffer.
-        return fuentes.map { f ->
-            if (esVideoDirecto(f.url)) f
-            else Sniffer.buscar(act, f.url, reglas.cabeceras) ?: f
         }
     }
 
@@ -103,9 +99,10 @@ class ProveedorJson(
         return if (paso.todos) candidatos else candidatos.take(1)
     }
 
-    private fun tipoDe(info: InfoContenido): ReglasTipo? = when (info.tipo) {
-        "movie" -> reglas.pelicula
-        "anime" -> reglas.anime
-        else -> reglas.serie
+    companion object {
+        private val COMODIN = Regex("\\{(tmdb|imdb|mal|temporada|episodio|titulo|tipo|anterior)\\}")
+
+        fun rellenar(texto: String, valores: Map<String, String>): String =
+            COMODIN.replace(texto) { m -> codificarURI(valores[m.groupValues[1]] ?: "") }
     }
 }

@@ -12,6 +12,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 
+/** Lo que encontró el Sniffer: el enlace directo y las cabeceras para pedirlo. */
+data class ResultadoSniff(val url: String, val headers: Map<String, String>)
+
 /**
  * Carga una página en un WebView oculto y mira las peticiones de red hasta
  * encontrar un enlace de video directo (.m3u8/.mpd/.mp4). Sirve para sitios
@@ -27,12 +30,12 @@ object Sniffer {
         url: String,
         cabeceras: Map<String, String>,
         tiempoMaximoMs: Long = 12_000
-    ): FuenteEncontrada? = withTimeoutOrNull(tiempoMaximoMs) {
+    ): ResultadoSniff? = withTimeoutOrNull(tiempoMaximoMs) {
         suspendCancellableCoroutine { cont ->
             val resuelto = AtomicBoolean(false)
             var web: WebView? = null
 
-            fun terminar(r: FuenteEncontrada?) {
+            fun terminar(r: ResultadoSniff?) {
                 if (!resuelto.compareAndSet(false, true)) return
                 act.runOnUiThread {
                     web?.let { w ->
@@ -65,15 +68,11 @@ object Sniffer {
                         if (PATRON_VIDEO.containsMatchIn(u)) {
                             val refererPeticion = request.requestHeaders.entries
                                 .firstOrNull { it.key.equals("Referer", true) }?.value
-                            terminar(
-                                FuenteEncontrada(
-                                    nombre = "Enlace detectado",
-                                    url = u,
-                                    ua = ua ?: Puente.UA,
-                                    referer = refererPeticion ?: cabeceras["Referer"] ?: url,
-                                    origen = "Sniffer"
-                                )
+                            val headersFinal = mapOf(
+                                "User-Agent" to (ua ?: Puente.UA),
+                                "Referer" to (refererPeticion ?: cabeceras["Referer"] ?: url)
                             )
+                            terminar(ResultadoSniff(u, headersFinal))
                         }
                         return null
                     }

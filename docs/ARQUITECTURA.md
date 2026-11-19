@@ -43,6 +43,8 @@ La app tiene dos partes:
 | `reproducir(url, titulo, cabecerasJson)` | Abre el reproductor nativo. |
 | `abrirExterno(url)` | Abre otra app (solo http/https). |
 | `tmdbKey()` / `version()` / `esTV()` / `aviso(texto)` | Información y avisos. |
+| `consultarProveedor(id, parametrosJson, callbackId)` | Resuelve UN proveedor (motor JSON local o servidor remoto). Responde a `App.proveedores._fin(callbackId, ok, resultadoJson)`. |
+| `validarProveedores(json)` | Valida (sin red) el JSON de Ajustes → Motor de proveedores. Devuelve `"OK"` o `"ERROR: …"`. |
 
 ## Datos guardados (en el teléfono)
 
@@ -72,21 +74,25 @@ La app tiene dos partes:
 
 ## Motor de proveedores (`proveedores/`)
 
-Paquete nuevo, en construcción: busca fuentes de video para películas, series y
-anime con varios "motores" que comparten la interfaz `MotorProveedor`:
+Busca fuentes de video para películas, series y anime. `ver()` en `app.js`
+junta las fuentes directas (motor + servidor remoto) con las plantillas de
+Ajustes → Fuentes, las ordena por `score` y abre "Elige una fuente".
 
 | Archivo | Qué hace |
 |---|---|
-| `MotorProveedor.kt` | Contrato común (`soporta`, `buscar`). |
-| `ProveedorPlantilla.kt` | Las 3 plantillas de hoy (Ajustes → Fuentes), como una implementación más. |
-| `ReglasJson.kt` / `ProveedorJson.kt` | Motor genérico configurable por JSON (Jsoup + Regex), sin recompilar. Ver `docs/PROVEEDORES.md`. |
+| `Modelos.kt` | `InfoContenido` (lo que se busca), `ResultadoProveedor` (un enlace encontrado), `codificarURI`, `esVideoDirecto`, `puntajeIdioma`. |
+| `MotorProveedor.kt` | Contrato común: `suspend fun buscar(info): List<ResultadoProveedor>`. |
+| `ReglasJson.kt` / `ProveedorJson.kt` | Motor genérico configurable por JSON (Jsoup + Regex, pasos encadenados), sin recompilar. Ver `docs/PROVEEDORES.md`. |
 | `Sniffer.kt` | WebView oculto que detecta enlaces de video generados por JavaScript. |
-| `ClienteEmbed.kt` | Cliente HTTP hacia un servidor TMDB-Embed-API propio (opcional). |
-| `RepositorioProveedores.kt` | Junta todos los proveedores configurados y les pregunta en paralelo. |
+| `ClienteEmbed.kt` | Cliente HTTP hacia un servidor TMDB-Embed-API propio (opcional, Ajustes → Servidor remoto). |
+| `RepositorioProveedores.kt` | Resuelve un `id` (proveedor JSON local o `servidor-remoto`) a su lista de enlaces. |
+| `ProveedorPlantilla.kt` | Sin uso (las plantillas de Ajustes → Fuentes ya se resuelven completas en `app.js`). Se puede borrar. |
 
-Se llama desde la web con `Nativo.buscarFuentes(id, infoJson)` → responde a
-`App.motores._fin(id, ok, fuentesJson)`. Por ahora solo existe el lado Kotlin;
-falta conectar Ajustes y la pantalla "Ver" en la interfaz web.
+Flujo: `ver()` (app.js) → `App.proveedores.buscarCategoria()` (nucleo.js, por
+cada proveedor activo de esa categoría, y agrega `servidor-remoto` si está
+activo) → `App.proveedores.buscar(id, parametros)` → `Nativo.consultarProveedor`
+(Puente.kt) → `RepositorioProveedores.resolver()` → `ProveedorJson` o
+`ClienteEmbed` → `App.proveedores._fin(callbackId, ok, resultadoJson)`.
 
 ## Versiones
 

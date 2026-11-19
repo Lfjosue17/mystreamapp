@@ -1,65 +1,84 @@
-# Proveedores de video (motor genérico, Etapa 2)
+# Proveedores de video (motor genérico)
 
-> Esta pantalla todavía no existe en Ajustes. Este documento describe el formato
-> que va a usar cuando la conectemos, para que puedas empezar a preparar tus
-> proveedores desde ahora.
+Se configura en **Ajustes → Motor de proveedores (JSON)**. A diferencia de una
+**Fuente** (plantilla simple con comodines, Ajustes → Fuentes), un **proveedor**
+describe paso a paso cómo encontrar el enlace en un sitio: a qué URL ir, qué
+selector CSS o expresión regular usar para sacar el enlace de ahí, y a qué
+otra URL ir con ese resultado. Todo se guarda como texto JSON: puedes agregar
+o actualizar sitios sin recompilar la app.
 
-A diferencia de una **Fuente** (plantilla simple con comodines, lo que ya existe
-hoy en Ajustes → Fuentes), un **proveedor del motor genérico** describe, paso a
-paso, cómo encontrar el enlace en un sitio: a qué URL ir, qué selector o qué
-expresión regular usar para sacar el enlace de ahí, y a qué otra URL ir con ese
-resultado. Todo esto se guarda como un texto JSON, así que puedes agregar o
-actualizar tus propios sitios sin recompilar la app.
-
-## Formato de cada paso
-
-| Campo | Para qué sirve |
-|---|---|
-| `url` | Página a visitar. Acepta los comodines `{tmdb}` `{imdb}` `{mal}` `{temporada}` `{episodio}` `{titulo}` `{tipo}`, y además `{anterior}` con el resultado del paso de antes. |
-| `selector` + `atributo` | Selector CSS (como los de jQuery) para sacar uno o varios valores del HTML. `atributo` puede ser `href`, `src`, `text`, etc. |
-| `regex` + `grupo` | Expresión regular para sacar un valor del HTML (o del resultado del selector, si van en el mismo paso). `grupo` es el grupo de captura `(...)` que quieres usar. |
-| `todos` | `true` para quedarte con **todos** los resultados de ese paso, no solo el primero (útil en el último paso si quieres que te pregunte "Elige una fuente"). |
-
-Un paso puede traer `url` solo (solo descarga), `selector`/`regex` solo (saca
-algo del HTML que bajó el paso anterior), o ambos (descarga y saca algo de una
-vez).
+> Nota: antes existió un borrador con otro formato (`urlTemplate` + `extract`,
+> en `docs/PROVEEDORES_JSON.md`). Ese formato no llegó a implementarse: el
+> motor real usa el esquema de `pasos[]` de este documento, porque permite
+> encadenar varias páginas (buscar → episodio → enlace final), algo que un
+> solo `urlTemplate` no puede hacer. `PROVEEDORES_JSON.md` quedó obsoleto;
+> puedes borrarlo.
 
 ## Plantilla vacía
+
+```json
+{ "version": 1, "providers": [] }
+```
+
+## Un proveedor
 
 ```json
 {
   "id": "mi-proveedor",
   "nombre": "Mi proveedor",
-  "activo": true,
+  "category": "movie",
+  "enabled": true,
   "cabeceras": { "User-Agent": "Mozilla/5.0", "Referer": "https://mi-sitio.com/" },
   "usarSniffer": false,
-  "pelicula": [
+  "language": "es-LA",
+  "subtitles": false,
+  "score": 0,
+  "pasos": [
     { "url": "https://mi-sitio.com/buscar?q={titulo}" },
     { "selector": "a.resultado", "atributo": "href" },
     { "selector": "a.ver-enlace", "atributo": "href" }
-  ],
-  "serie": [
-    { "url": "https://mi-sitio.com/serie/{tmdb}/temporada-{temporada}/episodio-{episodio}" },
-    { "selector": "a.ver-enlace", "atributo": "href" }
-  ],
-  "anime": []
+  ]
 }
 ```
 
-- Deja `"pelicula"`, `"serie"` o `"anime"` como `[]` (lista vacía) si ese
-  proveedor no sirve para ese tipo.
-- `"usarSniffer": true` le dice al motor que, si el último paso te deja en una
-  página web (no en un `.m3u8`/`.mpd`/`.mp4` directo), abra esa página en el
-  Media Sniffer para encontrar el enlace real antes de mandarlo al reproductor.
+## Campos
+
+| Campo | Para qué sirve |
+|---|---|
+| `id` | Identificador único (letras, números, `-`, `_`). Lo usa `Nativo.consultarProveedor(id, …)`. |
+| `nombre` | Se muestra en "Elige una fuente" (`providerName`). |
+| `category` | `movie`, `series` o `anime`. Decide a qué pantallas aplica. |
+| `enabled` | Activar/desactivar sin borrar. |
+| `cabeceras` | Cabeceras HTTP para pedir la página y, si no hay otras, para el enlace final (p. ej. `User-Agent`, `Referer`). |
+| `usarSniffer` | `true`: si el último paso deja una página web (no un `.m3u8`/`.mpd`/`.mp4` directo), se abre en el Media Sniffer (WebView oculto) para sacar el enlace real generado por JavaScript. |
+| `language` | Idioma declarado (`es-LA`, `es-ES`, `en`, …). Se usa para ordenar: español latino primero, España después, y subtitulado/original al final. |
+| `subtitles` | `true` si es el idioma original con subtítulos. |
+| `score` | Opcional. Si lo pones (> 0), se usa en vez de calcularlo desde `language`/`subtitles`. |
+| `pasos` | Lista de pasos (ver abajo). El último paso define el/los resultado(s) final(es). |
+
+### Cada paso de `pasos`
+
+| Campo | Para qué sirve |
+|---|---|
+| `url` | Página a visitar. Comodines: `{tmdb}` `{imdb}` `{mal}` `{temporada}` `{episodio}` `{titulo}` `{tipo}`, y `{anterior}` con el resultado del paso de antes. |
+| `selector` + `atributo` | Selector CSS (Jsoup) para sacar uno o varios valores del HTML. `atributo`: `href`, `src`, `text`, etc. |
+| `regex` + `grupo` | Expresión regular para sacar un valor del HTML (o del resultado del selector, si van en el mismo paso). `grupo` es el grupo de captura `(...)`. |
+| `todos` | `true` para quedarte con **todos** los resultados de ese paso, no solo el primero (útil en el último paso si quieres que "Elige una fuente" te dé varias opciones de este proveedor). |
+
+Un paso puede traer `url` solo (solo descarga), `selector`/`regex` solo (saca
+algo del HTML que bajó el paso anterior), o ambos.
 
 ## Servidor remoto (tu TMDB-Embed-API)
 
-Otro campo nuevo en la configuración, `servidorRemoto`, también sin pantalla
-todavía:
+En **Ajustes → Servidor remoto (opcional)** activas tu propio servidor (URL +
+API Key). Cuando está activo, se agrega automáticamente a la consulta junto
+con tus proveedores JSON (id reservado `servidor-remoto`, lo agrega
+`nucleo.js`); sus resultados se combinan y se ordenan igual, por idioma. El
+formato exacto de lo que responde tu servidor (`/api/fuentes?...`) se define
+en la Parte B (servidor TMDB-Embed-API).
 
-```json
-{ "activo": true, "url": "https://tu-servidor.onrender.com", "apiKey": "..." }
-```
+## Validación
 
-El formato exacto de lo que responde tu servidor (`/api/fuentes?...`) lo
-definimos juntos en la Parte B.
+`Ajustes → Validar y guardar proveedores` llama a `Nativo.validarProveedores(json)`
+(revisa la forma del JSON, sin red) antes de guardar. Si algo falta, te dice
+qué proveedor y qué campo.

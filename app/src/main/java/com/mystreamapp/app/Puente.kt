@@ -11,9 +11,10 @@ import android.net.Uri
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.Toast
-import com.mystreamapp.app.proveedores.FuenteEncontrada
 import com.mystreamapp.app.proveedores.InfoContenido
+import com.mystreamapp.app.proveedores.ReglasProveedor
 import com.mystreamapp.app.proveedores.RepositorioProveedores
+import com.mystreamapp.app.proveedores.ResultadoProveedor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -38,7 +39,7 @@ class Puente(private val act: Activity, private val web: WebView) {
     private val hilos = Executors.newFixedThreadPool(4)
     private val carpeta = File(act.filesDir, "datos").apply { mkdirs() }
 
-    // Para el motor de proveedores (Etapa 1/2): corre en segundo plano (IO).
+    // Para el motor de proveedores: corre en segundo plano (IO).
     private val alcance = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // ---------------- Guardado local ----------------
@@ -166,60 +167,92 @@ class Puente(private val act: Activity, private val web: WebView) {
         act.runOnUiThread { abrirFuera(act, Uri.parse(url)) }
     }
 
-    // ---------------- Proveedores de video (Etapa 1 y 2) ----------------
+    // ---------------- Proveedores de video ----------------
 
     /**
-     * Busca fuentes de video para una película/serie/anime usando todos los
-     * proveedores configurados (plantillas de hoy, motores JSON y tu servidor
-     * remoto, si está activo). Responde a `App.motores._fin(id, ok, fuentesJson)`
-     * en la interfaz web; `fuentesJson` es un arreglo de objetos con
-     * nombre/url/ua/referer/idioma/calidad/origen.
-     *
-     * Nota: todavía no hay nada en app.js que llame esta función ni pantallas en
-     * Ajustes para configurar `proveedoresJson` o `servidorRemoto`; eso se conecta
-     * en el siguiente paso.
+     * Busca fuentes para UN proveedor (por `id`): el motor JSON local, o tu
+     * servidor remoto si `id` es [RepositorioProveedores.ID_SERVIDOR_REMOTO].
+     * `parametrosJson` es `{ tmdb, imdb, mal, season, episode, title, type }`,
+     * igual a lo que ya manda `ver()` en app.js. Responde a
+     * `App.proveedores._fin(callbackId, ok, resultadoJson)`, donde cada
+     * resultado es `{ providerName, url, headers, language, subtitles, score }`.
      */
     @JavascriptInterface
-    fun buscarFuentes(id: String, infoJson: String) {
+    fun consultarProveedor(id: String, parametrosJson: String, callbackId: String) {
         alcance.launch {
             val (ok, resultado) = try {
-                val info = infoDesdeJson(infoJson)
+                val info = infoDesdeParametros(parametrosJson)
                 val config = JSONObject(leer("config") ?: "{}")
-                val fuentes = RepositorioProveedores(act).buscar(info, config)
-                true to fuentesAJson(fuentes)
+                val resultados = RepositorioProveedores(act).resolver(config, id, info)
+                true to resultadosAJson(resultados)
             } catch (e: Exception) {
                 false to (e.message ?: e.javaClass.simpleName)
             }
-            val js = "App.motores._fin(${JSONObject.quote(id)}, $ok, ${JSONObject.quote(resultado)})"
+            val js = "App.proveedores._fin(${JSONObject.quote(callbackId)}, $ok, ${JSONObject.quote(resultado)})"
             withContext(Dispatchers.Main) { web.evaluateJavascript(js, null) }
         }
     }
 
-    private fun infoDesdeJson(json: String): InfoContenido {
+    /**
+     * Valida (sin red) el JSON que se pega en Ajustes → Motor de proveedores.
+     * Devuelve "OK" si está bien, o "ERROR: <motivo>" si no (así lo espera
+     * `guardar-proveedores` en app.js).
+     */
+    @JavascriptInterface
+    fun validarProveedores(json: String): String {
+        return try {
+            val o = JSONObject(json)
+            if (o.optInt("version", 0) != 1) return "ERROR: falta \"version\": 1"
+            val arr = o.optJSONArray("providers") ?: return "ERROR: falta la lista \"providers\""
+            for (i in 0 until arr.length()) {
+                val p = arr.optJSONObject(i) ?: return "ERROR: el proveedor #${i + 1} no es un objeto válido"
+                val id = p.optString("id")
+                if (id.isBlank()) return "ERROR: el proveedor #${i + 1} no tiene \"id\""
+                if (p.optString("category").isBlank()) return "ERROR: el proveedor \"$id\" no tiene \"category\""
+                val pasos = p.optJSONArray("pasos")
+                if (pasos == null || pasos.length() == 0) return "ERROR: el proveedor \"$id\" no tiene \"pasos\""
+                for (j in 0 until pasos.length()) {
+                    val paso = pasos.optJSONObject(j) ?: return "ERROR: el paso ${j + 1} de \"$id\" no es un objeto válido"
+                    val regex = paso.optString("regex")
+                    if (regex.isNotBlank()) {
+                        try { Regex(regex) } catch (e: Exception) {
+                            return "ERROR: el regex del paso ${j + 1} de \"$id\" no es válido"
+                        }
+                    }
+                }
+                // Si pasa esto, ReglasProveedor también debería poder leerlo sin romperse.
+                ReglasProveedor.desdeJson(p)
+            }
+            "OK"
+        } catch (e: Exception) {
+            "ERROR: " + (e.message ?: "JSON no válido")
+        }
+    }
+
+    private fun infoDesdeParametros(json: String): InfoContenido {
         val o = JSONObject(json)
         return InfoContenido(
-            tipo = o.optString("tipo", "movie"),
+            tipo = o.optString("type", "movie"),
             tmdb = o.optString("tmdb"),
             imdb = o.optString("imdb"),
             mal = o.optString("mal"),
-            temporada = o.optInt("temporada", 1),
-            episodio = o.optInt("episodio", 1),
-            titulo = o.optString("titulo")
+            temporada = o.optInt("season", 1),
+            episodio = o.optInt("episode", 1),
+            titulo = o.optString("title")
         )
     }
 
-    private fun fuentesAJson(fuentes: List<FuenteEncontrada>): String {
+    private fun resultadosAJson(resultados: List<ResultadoProveedor>): String {
         val arr = JSONArray()
-        fuentes.forEach { f ->
+        resultados.forEach { r ->
             arr.put(
                 JSONObject().apply {
-                    put("nombre", f.nombre)
-                    put("url", f.url)
-                    put("ua", f.ua)
-                    put("referer", f.referer)
-                    put("idioma", f.idioma)
-                    put("calidad", f.calidad)
-                    put("origen", f.origen)
+                    put("providerName", r.providerName)
+                    put("url", r.url)
+                    put("headers", JSONObject(r.headers))
+                    put("language", r.language)
+                    put("subtitles", r.subtitles)
+                    put("score", r.score)
                 }
             )
         }
