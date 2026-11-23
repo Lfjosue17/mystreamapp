@@ -150,13 +150,40 @@ class Puente(private val act: Activity, private val web: WebView) {
 
     // ---------------- Reproducción ----------------
 
-    /** Abre el reproductor nativo (ExoPlayer) a pantalla completa. */
+    /**
+     * Abre el reproductor nativo (ExoPlayer) a pantalla completa.
+     * `tmdb`/`tipoContenido`/`temporada`/`episodio` son opcionales y sirven para buscar subtítulos
+     * en español con Wyzie Subs cuando `subtituloUrl` viene vacío. `idioma` (ej. "Latino",
+     * "Castellano", "Subtitulado") decide si el subtítulo se activa solo o solo queda disponible.
+     * `subtituloUrl` es un .vtt/.srt que ya vio el Sniffer para esta fuente (se usa de una vez, sin
+     * consultar Wyzie).
+     */
     @JavascriptInterface
-    fun reproducir(url: String, titulo: String?, cabecerasJson: String?) {
+    fun reproducir(
+        url: String,
+        titulo: String?,
+        cabecerasJson: String?,
+        tmdb: String? = null,
+        tipoContenido: String? = null,
+        temporada: Int = 0,
+        episodio: Int = 0,
+        idioma: String? = null,
+        subtituloUrl: String? = null
+    ) {
         val i = Intent(act, ReproductorActivity::class.java).apply {
             putExtra(ReproductorActivity.EXTRA_URL, url)
             putExtra(ReproductorActivity.EXTRA_TITULO, titulo ?: "")
             putExtra(ReproductorActivity.EXTRA_CABECERAS, cabecerasJson ?: "{}")
+            putExtra(ReproductorActivity.EXTRA_IDIOMA, idioma ?: "")
+            if (!subtituloUrl.isNullOrBlank()) {
+                putExtra(ReproductorActivity.EXTRA_SUBTITULO_URL, subtituloUrl)
+            }
+            if (!tmdb.isNullOrBlank()) {
+                putExtra(ReproductorActivity.EXTRA_TMDB, tmdb)
+                putExtra(ReproductorActivity.EXTRA_TIPO_CONTENIDO, tipoContenido ?: "movie")
+                putExtra(ReproductorActivity.EXTRA_TEMPORADA, temporada)
+                putExtra(ReproductorActivity.EXTRA_EPISODIO, episodio)
+            }
         }
         act.runOnUiThread { act.startActivity(i) }
     }
@@ -252,6 +279,7 @@ class Puente(private val act: Activity, private val web: WebView) {
                     put("headers", JSONObject(r.headers))
                     put("language", r.language)
                     put("subtitles", r.subtitles)
+                    put("subtitleUrl", r.subtitleUrl)
                     put("score", r.score)
                 }
             )

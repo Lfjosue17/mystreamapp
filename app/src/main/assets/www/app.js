@@ -104,8 +104,16 @@
     const cab = Object.assign({}, op.headers || {});
     if (op.ua) cab['User-Agent'] = op.ua;
     if (op.referer) cab.Referer = op.referer;
-    if (App.nativo && App.nativo.reproducir) App.nativo.reproducir(url, titulo || '', JSON.stringify(cab));
-    else window.open(url, '_blank', 'noopener');
+    if (App.nativo && App.nativo.reproducir) {
+      // tmdb/tipoContenido/temporada/episodio son para buscar subtítulos con Wyzie Subs (respaldo);
+      // subtituloUrl es uno que ya vio el Sniffer (se usa de una vez, sin red extra). idioma decide
+      // si el subtítulo se activa solo. Todos van vacíos cuando no aplica (canales de TV, deportes...).
+      App.nativo.reproducir(
+        url, titulo || '', JSON.stringify(cab),
+        op.tmdb || '', op.tipoContenido || '', Number(op.temporada || 0), Number(op.episodio || 0),
+        op.idioma || '', op.subtituloUrl || ''
+      );
+    } else window.open(url, '_blank', 'noopener');
   };
 
   // ---------------------------------------------------------------
@@ -289,8 +297,13 @@
   // =================================================================
   pantallas.buscar = async function (p, t) {
     p.tipo = p.tipo || 'movie';
+    p.filtro = p.filtro || 'todos';
     if (!App.tmdb.hayClave()) { poner(t, sinClaveHtml()); return; }
     const generos = await App.tmdb.get('/genre/' + p.tipo + '/list');
+    // Filtro de resultados de búsqueda (Todos/Películas/Series). Independiente de los chips de
+    // género de abajo, que sirven para explorar por categoría cuando no hay texto escrito.
+    const chipsFiltro = [['todos', 'Todos'], ['movie', 'Películas'], ['tv', 'Series']].map(([k, n]) =>
+      '<button class="chip foco' + (p.filtro === k ? ' activa' : '') + '" data-accion="buscar-filtro" data-v="' + k + '">' + n + '</button>').join('');
     const chipsTipo = [['movie', 'Películas'], ['tv', 'Series']].map(([k, n]) =>
       '<button class="chip foco' + (p.tipo === k ? ' activa' : '') + '" data-accion="buscar-tipo" data-v="' + k + '">' + n + '</button>').join('');
     const chipsGen = (generos.genres || []).map(g =>
@@ -298,6 +311,7 @@
     if (!poner(t,
       '<div class="cabecera"><label class="campo-busqueda">' + ICONO_LUPA +
       '<input id="q" type="search" placeholder="Película o serie…" autocomplete="off" value="' + esc(p.q || '') + '"></label></div>' +
+      '<div class="chips">' + chipsFiltro + '</div>' +
       '<div class="chips">' + chipsTipo + '</div><div class="chips">' + chipsGen + '</div>' +
       '<div id="resultados"><div class="cargando"><span></span></div></div>')) return;
 
@@ -322,6 +336,9 @@
     try {
       if (p.q) {
         r = await App.tmdb.get('/search/multi', { query: p.q, include_adult: 'false' });
+        if (p.filtro === 'movie' || p.filtro === 'tv') {
+          r = Object.assign({}, r, { results: (r.results || []).filter(x => x.media_type === p.filtro) });
+        }
         titulo = 'Resultados para “' + esc(p.q) + '”';
       } else {
         const params = { sort_by: 'popularity.desc', 'vote_count.gte': '50' };
@@ -472,7 +489,8 @@
       const respuestas = await App.proveedores.buscarCategoria(categoria, parametros);
       respuestas.forEach(f => directas.push({
         _direct: true, nombre: f.providerName + ' · ' + (f.language || 'Idioma no identificado'),
-        url: f.url, headers: f.headers || {}, language: f.language, subtitles: !!f.subtitles, score: Number(f.score || 0)
+        url: f.url, headers: f.headers || {}, language: f.language, subtitles: !!f.subtitles,
+        subtitleUrl: f.subtitleUrl || '', score: Number(f.score || 0)
       }));
       directas.sort((a, b) => b.score - a.score);
     }
@@ -485,8 +503,13 @@
     const abrir = f => {
       const conEp = info.tipo === 'tv' || info.tipo === 'anime';
       const etiqueta = (conEp ? info.titulo + ' · E' + info.episodio : info.titulo) + (f.language ? ' · ' + f.language : '');
-      if (f._direct) App.reproducir(f.url, etiqueta, { tipo: 'direct', headers: f.headers });
-      else App.reproducir(plantilla(f[campo], info), etiqueta, { tipo: 'fuente' });
+      // Los subtítulos de Wyzie (respaldo) necesitan un TMDB ID real: anime usa el ID de
+      // MyAnimeList, así que se excluye. subtitleUrl (si el Sniffer vio uno) sí viaja siempre.
+      const metaSubs = (info.tipo === 'movie' || info.tipo === 'tv')
+        ? { tmdb: info.id, tipoContenido: info.tipo, temporada: info.temporada || 0, episodio: info.episodio || 0, idioma: f.language || '', subtituloUrl: f.subtitleUrl || '' }
+        : { idioma: f.language || '', subtituloUrl: f.subtitleUrl || '' };
+      if (f._direct) App.reproducir(f.url, etiqueta, Object.assign({ tipo: 'direct', headers: f.headers }, metaSubs));
+      else App.reproducir(plantilla(f[campo], info), etiqueta, Object.assign({ tipo: 'fuente' }, metaSubs));
       if (conEp && estadoDetalle) registrarReciente(Object.assign({}, estadoDetalle.item, { temporada: info.temporada, episodio: info.episodio }));
     };
     cerrarModal();
@@ -695,14 +718,25 @@
     const grupos = Array.from(conteo.entries()).sort((a, b) => b[1] - a[1]).slice(0, 40).map(x => x[0]);
     const hayDeportes = datos.canales.some(ch => /sport|deport/i.test(ch.grupo));
     p.grupo = p.grupo || '__todos';
+    p.lista = p.lista || '__todas';
 
     const chip = (v, nombre) => '<button class="chip foco' + (p.grupo === v ? ' activa' : '') + '" data-accion="grupo" data-v="' + esc(v) + '">' + esc(nombre) + '</button>';
     let chips = chip('__todos', 'Todos') + chip('__fav', '★ Favoritos') + (hayDeportes ? chip('__deportes', 'Deportes') : '');
     chips += grupos.map(g => chip(g, g)).join('');
 
+    // Si hay más de una lista M3U activa, se puede filtrar también por cuál la trajo.
+    const nombresListas = Array.from(new Set(datos.canales.map(ch => ch.lista).filter(Boolean)));
+    let chipsListas = '';
+    if (nombresListas.length > 1) {
+      const chipLista = (v, nombre) => '<button class="chip foco' + (p.lista === v ? ' activa' : '') + '" data-accion="lista" data-v="' + esc(v) + '">' + esc(nombre) + '</button>';
+      chipsListas = '<div class="chips">' + chipLista('__todas', 'Todas las listas') +
+        nombresListas.map(n => chipLista(n, n)).join('') + '</div>';
+    }
+
     let html = '<div class="cabecera"><h1>TV en vivo</h1>' +
       '<label class="campo-busqueda">' + ICONO_LUPA + '<input id="q-canal" type="search" placeholder="Buscar canal…" autocomplete="off" value="' + esc(p.q || '') + '"></label>' +
       '<button class="btn sec peq foco" data-accion="actualizar-canales">⟳ Actualizar</button></div>' +
+      chipsListas +
       '<div class="chips">' + chips + '</div><div id="lista-canales"></div>';
     if (datos.errores.length) html += '<p class="nota error-txt">' + datos.errores.map(esc).join('<br>') + '</p>';
     if (!datos.listas) {
@@ -726,6 +760,7 @@
     const q = App.normalizar(p.q || '');
     const fav = new Set(favoritos);
     canalesFiltrados = datos.canales.filter(ch => {
+      if (p.lista && p.lista !== '__todas' && ch.lista !== p.lista) return false;
       if (p.grupo === '__fav' && !fav.has(ch.id)) return false;
       if (p.grupo === '__deportes' && !/sport|deport/i.test(ch.grupo)) return false;
       if (!p.grupo.startsWith('__') && (ch.grupo || 'Sin grupo') !== p.grupo) return false;
@@ -914,6 +949,7 @@
       case 'detalle': App.ir('detalle', { tipo: d.tipo, id: d.id }); break;
 
       // Buscar
+      case 'buscar-filtro': p.filtro = d.v; pintar(false); break;
       case 'buscar-tipo': p.tipo = d.v; p.genero = ''; pintar(false); break;
       case 'buscar-genero': p.genero = String(p.genero) === d.v ? '' : d.v; p.q = ''; pintar(false); break;
 
@@ -959,6 +995,7 @@
 
       // TV
       case 'grupo': p.grupo = d.v; pintar(false); break;
+      case 'lista': p.lista = d.v; pintar(false); break;
       case 'actualizar-canales': p.forzar = true; pintar(false); break;
       case 'mas-canales': mostrarMasCanales(); break;
       case 'canal': {

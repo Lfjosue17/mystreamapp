@@ -57,10 +57,12 @@ class ProveedorJson(
         return finales.map { u ->
             var urlFinal = u
             var cabecerasFinal = reglas.cabeceras
+            var subtituloFinal = ""
             if (reglas.usarSniffer && !esVideoDirecto(u)) {
                 Sniffer.buscar(act, u, reglas.cabeceras)?.let {
                     urlFinal = it.url
                     cabecerasFinal = it.headers
+                    subtituloFinal = it.subtitleUrl ?: ""
                 }
             }
             ResultadoProveedor(
@@ -68,8 +70,9 @@ class ProveedorJson(
                 url = urlFinal,
                 headers = cabecerasFinal,
                 language = reglas.language,
-                subtitles = reglas.subtitles,
-                score = puntaje
+                subtitles = reglas.subtitles || subtituloFinal.isNotBlank(),
+                score = puntaje,
+                subtitleUrl = subtituloFinal
             )
         }
     }

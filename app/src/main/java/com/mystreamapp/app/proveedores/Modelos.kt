@@ -37,7 +37,9 @@ data class ResultadoProveedor(
     val headers: Map<String, String> = emptyMap(),
     val language: String = "",
     val subtitles: Boolean = false,
-    val score: Double = 0.0
+    val score: Double = 0.0,
+    /** URL de un .vtt/.srt visto por el Sniffer mientras buscaba el video (vacío si no vio ninguno). */
+    val subtitleUrl: String = ""
 )
 
 /**

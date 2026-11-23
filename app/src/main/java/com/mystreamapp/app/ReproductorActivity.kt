@@ -1,6 +1,7 @@
 package com.mystreamapp.app
 
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import android.view.ViewGroup
@@ -12,6 +13,8 @@ import androidx.annotation.OptIn
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
@@ -22,6 +25,13 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONArray
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
  * Reproductor a pantalla completa para canales y enlaces directos (m3u8, mpd, mp4...).
@@ -82,6 +92,87 @@ class ReproductorActivity : ComponentActivity() {
         val cab = Puente.leerCabeceras(intent.getStringExtra(EXTRA_CABECERAS)).toMutableMap()
         val ua = cab.remove("User-Agent") ?: Puente.UA
 
+        val tmdb = intent.getStringExtra(EXTRA_TMDB).orEmpty()
+        val tipoContenido = intent.getStringExtra(EXTRA_TIPO_CONTENIDO).orEmpty()
+        val temporada = intent.getIntExtra(EXTRA_TEMPORADA, 0)
+        val episodio = intent.getIntExtra(EXTRA_EPISODIO, 0)
+        val idioma = intent.getStringExtra(EXTRA_IDIOMA).orEmpty()
+        val subtituloDirecto = intent.getStringExtra(EXTRA_SUBTITULO_URL).orEmpty()
+
+        // Si el Sniffer ya vio pasar un .vtt/.srt para esta fuente, se usa de una vez; si no,
+        // se consulta Wyzie Subs como respaldo (con tope de 4s para no demorar la reproducción).
+        lifecycleScope.launch {
+            val subtitulo = when {
+                subtituloDirecto.isNotBlank() -> subtituloDesdeUrl(subtituloDirecto, idioma)
+                tmdb.isNotBlank() -> buscarSubtituloWyzie(tmdb, tipoContenido, temporada, episodio, idioma)
+                else -> null
+            }
+            prepararYReproducir(url, cab, ua, subtitulo)
+        }
+    }
+
+    /** Arma la configuración de subtítulo para ExoPlayer a partir de un .vtt/.srt ya conocido. */
+    private fun subtituloDesdeUrl(subUrl: String, idioma: String): MediaItem.SubtitleConfiguration {
+        // Si ya parece doblaje en español, el subtítulo queda disponible pero no se activa solo;
+        // si el audio parece inglés/original, se activa por defecto.
+        val esDoblajeEspanol = Regex("latino|castellano|espa[nñ]ol", RegexOption.IGNORE_CASE)
+            .containsMatchIn(idioma)
+        val mime = if (subUrl.endsWith(".srt", ignoreCase = true)) {
+            MimeTypes.APPLICATION_SUBRIP
+        } else {
+            MimeTypes.TEXT_VTT
+        }
+        return MediaItem.SubtitleConfiguration.Builder(Uri.parse(subUrl))
+            .setMimeType(mime)
+            .setLanguage("es")
+            .setLabel("Español")
+            .setSelectionFlags(if (esDoblajeEspanol) 0 else C.SELECTION_FLAG_DEFAULT)
+            .build()
+    }
+
+    /** Consulta la API gratuita de Wyzie Subs y devuelve un subtítulo en español listo para ExoPlayer, o null. */
+    private suspend fun buscarSubtituloWyzie(
+        tmdb: String,
+        tipo: String,
+        temporada: Int,
+        episodio: Int,
+        idioma: String
+    ): MediaItem.SubtitleConfiguration? = withContext(Dispatchers.IO) {
+        withTimeoutOrNull(4_000) {
+            try {
+                var url = "https://sub.wyzie.ru/search?id=" + Uri.encode(tmdb) + "&language=es"
+                if (tipo == "tv" && temporada > 0 && episodio > 0) {
+                    url += "&season=$temporada&episode=$episodio"
+                }
+                val con = (URL(url).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 3_500
+                    readTimeout = 3_500
+                    setRequestProperty("User-Agent", Puente.UA)
+                    setRequestProperty("Accept", "application/json")
+                }
+                val texto = try {
+                    con.inputStream.bufferedReader().use { it.readText() }
+                } finally {
+                    con.disconnect()
+                }
+                val arr = JSONArray(texto)
+                if (arr.length() == 0) return@withTimeoutOrNull null
+                val primero = arr.optJSONObject(0) ?: return@withTimeoutOrNull null
+                val subUrl = primero.optString("url").ifBlank { primero.optString("link") }
+                if (subUrl.isBlank()) return@withTimeoutOrNull null
+                subtituloDesdeUrl(subUrl, idioma)
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
+    private fun prepararYReproducir(
+        url: String,
+        cab: MutableMap<String, String>,
+        ua: String,
+        subtitulo: MediaItem.SubtitleConfiguration?
+    ) {
         val http = DefaultHttpDataSource.Factory()
             .setUserAgent(ua)
             .setAllowCrossProtocolRedirects(true)
@@ -93,9 +184,10 @@ class ReproductorActivity : ComponentActivity() {
         val item = MediaItem.Builder().setUri(url).apply {
             val u = url.lowercase()
             when {
-                ".m3u8" in u || "/hls/" in u -> setMimeType(MimeTypes.APPLICATION_M3U8)
+                "m3u8" in u || "hls" in u || "master" in u -> setMimeType(MimeTypes.APPLICATION_M3U8)
                 ".mpd" in u -> setMimeType(MimeTypes.APPLICATION_MPD)
             }
+            if (subtitulo != null) setSubtitleConfigurations(listOf(subtitulo))
         }.build()
 
         val p = ExoPlayer.Builder(this).setMediaSourceFactory(fabrica).build()
@@ -136,6 +228,12 @@ class ReproductorActivity : ComponentActivity() {
         const val EXTRA_URL = "url"
         const val EXTRA_TITULO = "titulo"
         const val EXTRA_CABECERAS = "cabeceras"
+        const val EXTRA_TMDB = "tmdb"
+        const val EXTRA_TIPO_CONTENIDO = "tipoContenido"
+        const val EXTRA_TEMPORADA = "temporada"
+        const val EXTRA_EPISODIO = "episodio"
+        const val EXTRA_IDIOMA = "idioma"
+        const val EXTRA_SUBTITULO_URL = "subtituloUrl"
         private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
     }
 }
