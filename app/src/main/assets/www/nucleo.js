@@ -357,15 +357,33 @@ window.App = window.App || {};
     return App.fechaLocal(new Date(a, m - 1, d + n));
   }
 
+  const cacheEventosDia = new Map(); // clave: 'fecha|deporte' -> { t, datos: { lista, fallo } }
+  const TTL_EVENTOS_DIA = 90 * 1000;
+
+  /** Pide una URL y reintenta una vez tras una pausa corta (la clave gratis "123" de
+   *  TheSportsDB es compartida por todo el mundo y a veces responde con error o vacío). */
+  async function pedirConReintento(url) {
+    try { return await App.red.json(url); }
+    catch (e) {
+      await new Promise(r => setTimeout(r, 700));
+      return App.red.json(url);
+    }
+  }
+
   async function eventosSportsDb(fecha, deporte) {
+    const claveCache = fecha + '|' + (deporte || '');
+    const cache = cacheEventosDia.get(claveCache);
+    if (cache && Date.now() - cache.t < TTL_EVENTOS_DIA) return cache.datos;
+
     const c = App.config.obtener();
     const clave = encodeURIComponent((c.sportsdbKey || '123').trim());
     const s = deporte && DEPORTES[deporte] ? '&s=' + encodeURIComponent(DEPORTES[deporte].api) : '';
     // La agenda está en UTC: se piden el día y el siguiente para cubrir la noche local.
     const dias = [fecha, sumarDias(fecha, 1)];
+    let fallo = false;
     const respuestas = await Promise.all(dias.map(d =>
-      App.red.json('https://www.thesportsdb.com/api/v1/json/' + clave + '/eventsday.php?d=' + d + s)
-        .catch(() => ({ events: null }))));
+      pedirConReintento('https://www.thesportsdb.com/api/v1/json/' + clave + '/eventsday.php?d=' + d + s)
+        .catch(() => { fallo = true; return { events: null }; })));
     const lista = [];
     const vistos = new Set();
     respuestas.forEach(r => (r.events || []).forEach(ev => {
@@ -387,7 +405,9 @@ window.App = window.App || {};
         enlaces: [], origen: 'TheSportsDB'
       });
     }));
-    return lista;
+    const datos = { lista, fallo };
+    cacheEventosDia.set(claveCache, { t: Date.now(), datos });
+    return datos;
   }
 
   async function leerAgenda(ag) {
@@ -466,7 +486,7 @@ window.App = window.App || {};
 
   App.deportes = {
     LISTA: Object.keys(DEPORTES),
-    limpiarCache() { cacheAgendas.clear(); },
+    limpiarCache() { cacheAgendas.clear(); cacheEventosDia.clear(); },
     /** Detalle de un evento de TheSportsDB: estado/marcador/sede + línea de tiempo (goles/tarjetas), si existe. */
     async detalleEvento(idEvent) {
       const c = App.config.obtener();
@@ -493,12 +513,13 @@ window.App = window.App || {};
     },
     async eventosDelDia(fecha, deporte) {
       const errores = [];
-      const [api, propios] = await Promise.all([
-        eventosSportsDb(fecha, deporte).catch(e => { errores.push('TheSportsDB: ' + e.message); return []; }),
+      const [res, propios] = await Promise.all([
+        eventosSportsDb(fecha, deporte).catch(e => { errores.push('TheSportsDB: ' + e.message); return { lista: [], fallo: true }; }),
         eventosDeAgendas(fecha, deporte, errores)
       ]);
+      if (res.fallo) errores.push('TheSportsDB no respondió bien (su clave gratis es compartida y a veces se satura). Vuelve a entrar en unos segundos.');
       // Si un evento de tu agenda coincide con uno de TheSportsDB, se le pegan los enlaces.
-      const resultado = api.slice();
+      const resultado = res.lista.slice();
       propios.forEach(p => {
         const igual = resultado.find(a => mismoEvento(a, p) || mismoEvento(p, a));
         if (igual) {

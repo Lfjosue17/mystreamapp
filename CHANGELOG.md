@@ -1,5 +1,15 @@
 # Cambios
 
+## [0.6.1] - 2026-11-26
+
+### Arreglado
+- Deportes: a veces la lista de partidos salía vacía aunque sí había eventos ese día. Era TheSportsDB
+  (la clave gratis `123` es compartida por todo el mundo y a veces responde con error o se demora) y el
+  código lo tragaba en silencio sin avisar. Ahora: 1) si falla, reintenta una vez; 2) si aun así falla,
+  se nota con un mensaje debajo de la lista (antes solo decía "No hay eventos" sin distinguir si de
+  verdad no había o si fue un fallo de red); 3) se guarda en caché 90s por día/deporte para no repetir
+  peticiones de más al cambiar de pestaña, que es lo que más dispara el límite de la clave compartida.
+
 ## [0.6.0] - 2026-11-26
 
 ### Agregado
