@@ -8,6 +8,10 @@
   con la clave gratis sin registro. No incluye el gráfico de posesión/ataques en vivo (eso es de la API
   de pago de TheSportsDB o de otros servicios que piden registro, y no se quiso usar ninguno de pago).
   Los eventos que solo vienen de tus agendas propias (sin ID de TheSportsDB) no muestran este botón.
+- Agendas: los enlaces ahora aceptan un campo opcional `"modo": "web"` para forzar que se abran en el
+  visor web en vez del reproductor nativo (necesario para enlaces tipo iframe/embed sin extensión de
+  video, como los de la nueva agenda de partidos en vivo de mystream-api v1.10.0, `/api/sports/agenda`).
+  Sin ese campo, el comportamiento es el mismo de siempre.
 
 ## [0.5.1] - 2026-11-26
 

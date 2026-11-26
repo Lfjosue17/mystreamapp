@@ -426,7 +426,7 @@ window.App = window.App || {};
             inicio: d.getTime(), estado: e.estado || '', marcador: e.marcador || '',
             enlaces: (e.enlaces || e.links || []).map((x, j) => typeof x === 'string'
               ? { nombre: 'Opción ' + (j + 1), url: x }
-              : { nombre: x.nombre || x.name || ('Opción ' + (j + 1)), url: x.url, ua: x.ua || '', referer: x.referer || '' })
+              : { nombre: x.nombre || x.name || ('Opción ' + (j + 1)), url: x.url, ua: x.ua || '', referer: x.referer || '', modo: x.modo || '' })
               .filter(x => x.url)
               .map(x => Object.assign(x, { origen: ag.nombre })),
             origen: ag.nombre

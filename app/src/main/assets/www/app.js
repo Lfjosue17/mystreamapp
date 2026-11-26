@@ -99,7 +99,8 @@
     url = urlSegura(url);
     if (!url) return aviso('Este enlace no es válido');
     if (/(^|\.)youtube\.com|youtu\.be/i.test(url)) return abrirExterno(url);
-    const web = op.tipo === 'direct' ? false : (op.tipo === 'fuente' ? !esVideoDirecto(url) : esPaginaWeb(url));
+    const web = op.tipo === 'direct' ? false : op.tipo === 'web' ? true
+      : (op.tipo === 'fuente' ? !esVideoDirecto(url) : esPaginaWeb(url));
     if (web) return abrirMarco(url, titulo);
     const cab = Object.assign({}, op.headers || {});
     if (op.ua) cab['User-Agent'] = op.ua;
@@ -1029,7 +1030,7 @@
       case 'enlace': {
         const ev = eventosActuales[Number(d.ev)];
         const x = ev && ev.enlaces[Number(d.i)];
-        if (x) { cerrarModal(); App.reproducir(x.url, ev.titulo, { tipo: 'enlace', ua: x.ua, referer: x.referer }); }
+        if (x) { cerrarModal(); App.reproducir(x.url, ev.titulo, { tipo: x.modo === 'web' ? 'web' : 'enlace', ua: x.ua, referer: x.referer }); }
         break;
       }
       case 'buscar-canal': cerrarModal(); App.ir('tv', { grupo: '__deportes' }); break;

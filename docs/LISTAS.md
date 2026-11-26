@@ -96,9 +96,26 @@ la app **junta los dos**: los datos de TheSportsDB y tus enlaces. Si no coincide
 | `local`, `visita` | No | Sirven para juntar con TheSportsDB. Escríbelos igual que en inglés si puedes (ej. “Spain”). |
 | `deporte` | No | Fútbol, Baloncesto, Béisbol, Fútbol americano, Motor, Combate o Tenis. Para los filtros. |
 | `liga` | No | Título del grupo en pantalla. |
-| `enlaces` | No | Lista de `{nombre, url, ua, referer}` o solo textos con la URL. |
+| `enlaces` | No | Lista de `{nombre, url, ua, referer, modo}` o solo textos con la URL. |
+
+`modo: "web"` es opcional: fuerza que ese enlace se abra en el visor web en vez del reproductor nativo
+(útil para enlaces tipo iframe/embed que no terminan en `.m3u8`/`.mp4` ni tienen `.html`/`/embed/`).
+Sin ese campo, se detecta solo como siempre (ver sección 1).
 
 También se acepta directamente una lista `[ {…}, {…} ]` sin el `"eventos"`.
+
+### Agenda de partidos en vivo lista para usar (mystream-api)
+
+Si tienes tu propio mystream-api corriendo (en Render o donde sea), ya trae una agenda de partidos en
+vivo normalizada: agrégala en **Ajustes → Agendas deportivas → Agregar** con esta URL (sin API Key,
+es una ruta pública de solo lectura):
+
+```
+https://TU-SERVIDOR/api/sports/agenda
+```
+
+(reemplaza `TU-SERVIDOR` por tu URL de Render). Se junta automáticamente con la agenda de TheSportsDB
+por nombre de equipo, igual que cualquier otra agenda tuya.
 
 ### Cómo mantener tu agenda al día (sin tocar la app)
 
