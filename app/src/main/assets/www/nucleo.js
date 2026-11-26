@@ -183,10 +183,21 @@ window.App = window.App || {};
   App.jikan = {
     get(ruta, params) {
       const q = params ? '?' + new URLSearchParams(params).toString() : '';
-      const url = 'https://api.jikan.moe/v4' + ruta + q;
+      // Si hay servidor remoto activo, pasar por su proxy a Jikan en vez de
+      // pedirlo directo desde el teléfono: ese pedido directo fallaba seguido
+      // (Jikan es lento/limita peticiones y hay redes con mala ruta hacia esa
+      // API), mientras que el servidor sí le habla bien. Sin servidor remoto
+      // configurado, sigue funcionando igual que antes (pedido directo).
+      const c = App.config.obtener();
+      const sr = c.servidorRemoto;
+      const usarServidor = !!(sr && sr.activo && (sr.url || '').trim());
+      const url = usarServidor
+        ? sr.url.trim().replace(/\/+$/, '') + '/api/jikan' + ruta + q
+        : 'https://api.jikan.moe/v4' + ruta + q;
+      const cabeceras = usarServidor ? { 'X-API-Key': sr.apiKey || '' } : undefined;
       if (cacheJikan.has(url)) return cacheJikan.get(url);
       // Encadena las peticiones con una pequeña pausa para no pasar el límite.
-      const p = colaJikan.then(() => App.red.json(url)).then(r => {
+      const p = colaJikan.then(() => App.red.json(url, cabeceras)).then(r => {
         if (r && r.status && r.status >= 400) throw new Error(r.message || 'Jikan rechazó la petición');
         return r;
       });

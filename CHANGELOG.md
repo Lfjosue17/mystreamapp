@@ -1,5 +1,10 @@
 # Cambios
 
+## [0.5.0] - 2026-11-26
+
+### Agregado
+- Anime: el catálogo (MyAnimeList/Jikan) ya no se pide directo desde el teléfono — pasa por el proxy nuevo del servidor (`/api/jikan/*`, mystream-api v1.9.0) cuando el servidor remoto está activo en Ajustes. El pedido directo a `api.jikan.moe` fallaba seguido (confirmado en wifi y datos móviles); el servidor sí le habla bien. Sin servidor remoto activo, sigue pidiendo directo como antes.
+
 ## [0.4.0] - 2026-11-23
 
 ### Agregado
