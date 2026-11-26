@@ -1,5 +1,37 @@
 # Cambios
 
+## [0.7.0] - 2026-11-26
+
+### Agregado
+- Deportes: nueva fuente automática de partidos en vivo, sin configurar nada. Si tienes activado
+  "Servidor remoto" (lo mismo que ya usan Jikan y los proveedores), la app ahora también trae partidos
+  de esa misma dirección, que da varios enlaces de transmisión por partido (no solo uno) y no tiene el
+  límite de TheSportsDB. Se mezcla con lo que ya salía: si un partido aparece en ambas fuentes, junta
+  los enlaces en vez de duplicar la tarjeta.
+- La app ahora puede cargar su interfaz (los archivos que antes solo iban dentro del APK) desde el
+  servidor, con la configuración de "Servidor remoto" ya guardada. Si el servidor no responde en 4
+  segundos o falla, usa automáticamente la copia local que trae el APK — no se queda pegada esperando.
+  Razón: a partir de este APK, un arreglo que sea solo de la interfaz (no de este archivo nativo) se
+  sube con un `git push` al servidor y llega a tu teléfono sin tener que instalar un APK nuevo.
+
+## [0.6.2] - 2026-11-26
+
+### Arreglado
+- Listas de canales (M3U): al agregar, activar/apagar o eliminar una lista en Ajustes, la pantalla TV
+  seguía mostrando los canales viejos de memoria hasta tocar "Actualizar canales" o reiniciar la app.
+  Ahora esas acciones limpian esa memoria, así que la lista nueva (o el cambio) sale en la próxima vez
+  que entras a TV, sin pasos extra.
+- Anime: el proxy de Jikan del servidor a veces daba HTTP 502 de forma persistente (la salida de Render
+  hacia esa API puede ser lenta o quedar bloqueada). Ahora, si el camino por el servidor falla, se
+  reintenta directo desde el teléfono en vez de mostrar el error — el catálogo ya no depende de un
+  solo camino de red.
+
+### Nota (sin cambio de código)
+- Deportes: con la clave gratis de TheSportsDB (`123`) es normal ver solo un puñado de partidos reales
+  por día, no el calendario completo — esa clave limita cuántos resultados devuelve por diseño (no es
+  un error de la app). Para ver más partidos se necesitaría una clave personal de pago de TheSportsDB
+  (desde unos \$3-9/mes); si no quieres pagar, se queda así.
+
 ## [0.6.1] - 2026-11-26
 
 ### Arreglado

@@ -183,27 +183,35 @@ window.App = window.App || {};
   App.jikan = {
     get(ruta, params) {
       const q = params ? '?' + new URLSearchParams(params).toString() : '';
-      // Si hay servidor remoto activo, pasar por su proxy a Jikan en vez de
-      // pedirlo directo desde el teléfono: ese pedido directo fallaba seguido
-      // (Jikan es lento/limita peticiones y hay redes con mala ruta hacia esa
-      // API), mientras que el servidor sí le habla bien. Sin servidor remoto
-      // configurado, sigue funcionando igual que antes (pedido directo).
+      // Si hay servidor remoto activo, se intenta primero por su proxy a Jikan.
+      // Pero si ese camino falla (p.ej. la salida de Render hacia Jikan está
+      // bloqueada o lenta), se reintenta directo desde el teléfono en vez de
+      // dar el error por perdido: así el catálogo de Anime no depende de un
+      // solo camino de red. Sin servidor remoto configurado, va directo.
       const c = App.config.obtener();
       const sr = c.servidorRemoto;
       const usarServidor = !!(sr && sr.activo && (sr.url || '').trim());
-      const url = usarServidor
-        ? sr.url.trim().replace(/\/+$/, '') + '/api/jikan' + ruta + q
-        : 'https://api.jikan.moe/v4' + ruta + q;
-      const cabeceras = usarServidor ? { 'X-API-Key': sr.apiKey || '' } : undefined;
-      if (cacheJikan.has(url)) return cacheJikan.get(url);
-      // Encadena las peticiones con una pequeña pausa para no pasar el límite.
-      const p = colaJikan.then(() => App.red.json(url, cabeceras)).then(r => {
+      const urlServidor = usarServidor ? sr.url.trim().replace(/\/+$/, '') + '/api/jikan' + ruta + q : null;
+      const urlDirecto = 'https://api.jikan.moe/v4' + ruta + q;
+      const cabecerasServidor = usarServidor ? { 'X-API-Key': sr.apiKey || '' } : undefined;
+      const clave = urlServidor || urlDirecto;
+      if (cacheJikan.has(clave)) return cacheJikan.get(clave);
+
+      const revisar = r => {
         if (r && r.status && r.status >= 400) throw new Error(r.message || 'Jikan rechazó la petición');
         return r;
-      });
+      };
+      async function pedir() {
+        if (!urlServidor) return App.red.json(urlDirecto).then(revisar);
+        try { return await App.red.json(urlServidor, cabecerasServidor).then(revisar); }
+        catch (e) { return App.red.json(urlDirecto).then(revisar); }
+      }
+
+      // Encadena las peticiones con una pequeña pausa para no pasar el límite.
+      const p = colaJikan.then(pedir);
       colaJikan = p.then(() => new Promise(r => setTimeout(r, 400)), () => new Promise(r => setTimeout(r, 400)));
-      cacheJikan.set(url, p);
-      p.catch(() => cacheJikan.delete(url));
+      cacheJikan.set(clave, p);
+      p.catch(() => cacheJikan.delete(clave));
       return p;
     }
   };
@@ -425,6 +433,28 @@ window.App = window.App || {};
     return DEPORTES[deporte].nombres.some(x => n.includes(x));
   }
 
+  /** Convierte un evento de agenda (propia o del servidor) al formato interno. Devuelve null si no tiene fecha válida. */
+  function mapearEventoAgenda(e, i, prefijoId, origen) {
+    const d = new Date(e.inicio || e.fecha || e.start);
+    if (isNaN(d)) return null;
+    return {
+      id: prefijoId + i,
+      _fechaLocal: App.fechaLocal(d),
+      titulo: e.titulo || e.title || ((e.local || '') + ' vs ' + (e.visita || '')),
+      local: e.local || '', visita: e.visita || '',
+      escudoLocal: e.escudoLocal || '', escudoVisita: e.escudoVisita || '',
+      liga: e.liga || e.league || '', deporte: e.deporte || '',
+      imagen: e.imagen || e.logo || '',
+      inicio: d.getTime(), estado: e.estado || '', marcador: e.marcador || '',
+      enlaces: (e.enlaces || e.links || []).map((x, j) => typeof x === 'string'
+        ? { nombre: 'Opción ' + (j + 1), url: x }
+        : { nombre: x.nombre || x.name || ('Opción ' + (j + 1)), url: x.url, ua: x.ua || '', referer: x.referer || '', modo: x.modo || '' })
+        .filter(x => x.url)
+        .map(x => Object.assign(x, { origen })),
+      origen
+    };
+  }
+
   async function eventosDeAgendas(fecha, deporte, errores) {
     const c = App.config.obtener();
     const lista = [];
@@ -433,27 +463,45 @@ window.App = window.App || {};
         const datos = await leerAgenda(ag);
         const eventos = Array.isArray(datos) ? datos : (datos.eventos || datos.events || []);
         eventos.forEach((e, i) => {
-          const d = new Date(e.inicio || e.fecha || e.start);
-          if (isNaN(d) || App.fechaLocal(d) !== fecha) return;
+          const ev = mapearEventoAgenda(e, i, 'ag-' + ag.id + '-', ag.nombre);
+          if (!ev || ev._fechaLocal !== fecha) return;
           if (!coincideDeporte(e.deporte, deporte)) return;
-          lista.push({
-            id: 'ag-' + ag.id + '-' + i,
-            titulo: e.titulo || e.title || ((e.local || '') + ' vs ' + (e.visita || '')),
-            local: e.local || '', visita: e.visita || '',
-            escudoLocal: e.escudoLocal || '', escudoVisita: e.escudoVisita || '',
-            liga: e.liga || e.league || '', deporte: e.deporte || '',
-            imagen: e.imagen || e.logo || '',
-            inicio: d.getTime(), estado: e.estado || '', marcador: e.marcador || '',
-            enlaces: (e.enlaces || e.links || []).map((x, j) => typeof x === 'string'
-              ? { nombre: 'Opción ' + (j + 1), url: x }
-              : { nombre: x.nombre || x.name || ('Opción ' + (j + 1)), url: x.url, ua: x.ua || '', referer: x.referer || '', modo: x.modo || '' })
-              .filter(x => x.url)
-              .map(x => Object.assign(x, { origen: ag.nombre })),
-            origen: ag.nombre
-          });
+          delete ev._fechaLocal;
+          lista.push(ev);
         });
       } catch (e) { errores.push(ag.nombre + ': ' + e.message); }
     }));
+    return lista;
+  }
+
+  /** Agenda de partidos en vivo del propio servidor remoto (si está activado), automática y sin
+   *  configurar nada aparte: usa la misma URL/clave de "Servidor remoto" que ya sirve para Jikan
+   *  y los proveedores. Da más cobertura que TheSportsDB gratis y, si el partido tiene varios
+   *  servidores de transmisión, todos salen como opciones del evento. */
+  async function eventosServidorRemoto(fecha, deporte, errores) {
+    const c = App.config.obtener();
+    const sr = c.servidorRemoto;
+    if (!sr || !sr.activo || !(sr.url || '').trim()) return [];
+    const claveCache = '__servidor-deportes__';
+    const g = cacheAgendas.get(claveCache);
+    let datos;
+    if (g && Date.now() - g.t < 10 * 60e3) {
+      datos = g.datos;
+    } else {
+      try {
+        datos = await App.red.json(sr.url.trim().replace(/\/+$/, '') + '/api/sports/agenda', { 'X-API-Key': sr.apiKey || '' });
+        cacheAgendas.set(claveCache, { t: Date.now(), datos });
+      } catch (e) { errores.push('Agenda en vivo del servidor: ' + e.message); return []; }
+    }
+    const eventos = Array.isArray(datos) ? datos : (datos.eventos || datos.events || []);
+    const lista = [];
+    eventos.forEach((e, i) => {
+      const ev = mapearEventoAgenda(e, i, 'srv-', 'En vivo');
+      if (!ev || ev._fechaLocal !== fecha) return;
+      if (!coincideDeporte(e.deporte, deporte)) return;
+      delete ev._fechaLocal;
+      lista.push(ev);
+    });
     return lista;
   }
 
@@ -513,14 +561,16 @@ window.App = window.App || {};
     },
     async eventosDelDia(fecha, deporte) {
       const errores = [];
-      const [res, propios] = await Promise.all([
+      const [res, propios, remotos] = await Promise.all([
         eventosSportsDb(fecha, deporte).catch(e => { errores.push('TheSportsDB: ' + e.message); return { lista: [], fallo: true }; }),
-        eventosDeAgendas(fecha, deporte, errores)
+        eventosDeAgendas(fecha, deporte, errores),
+        eventosServidorRemoto(fecha, deporte, errores)
       ]);
       if (res.fallo) errores.push('TheSportsDB no respondió bien (su clave gratis es compartida y a veces se satura). Vuelve a entrar en unos segundos.');
-      // Si un evento de tu agenda coincide con uno de TheSportsDB, se le pegan los enlaces.
+      // Si un evento de tu agenda (o de la agenda en vivo del servidor) coincide con uno de
+      // TheSportsDB, se le pegan los enlaces; si no coincide con nada, se agrega como evento propio.
       const resultado = res.lista.slice();
-      propios.forEach(p => {
+      propios.concat(remotos).forEach(p => {
         const igual = resultado.find(a => mismoEvento(a, p) || mismoEvento(p, a));
         if (igual) {
           igual.enlaces = igual.enlaces.concat(p.enlaces);

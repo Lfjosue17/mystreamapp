@@ -682,8 +682,11 @@
         }).join('') + '</div>';
       });
     }
+    const confAgenda = App.config.obtener();
+    const srActivo = !!(confAgenda.servidorRemoto && confAgenda.servidorRemoto.activo && (confAgenda.servidorRemoto.url || '').trim());
     html += '<p class="nota" style="margin-top:16px">Agenda: TheSportsDB' +
-      (App.config.obtener().agendas.some(a => a.activa !== false) ? ' + tus agendas' : '') + '. Horas en tu zona horaria.</p>';
+      (srActivo ? ' + agenda en vivo del servidor' : '') +
+      (confAgenda.agendas.some(a => a.activa !== false) ? ' + tus agendas' : '') + '. Horas en tu zona horaria.</p>';
     if (errores.length) html += '<p class="nota error-txt">' + errores.map(esc).join('<br>') + '</p>';
     poner(t, html);
   };
@@ -956,6 +959,7 @@
     }
     c[tipo].push(nuevo);
     App.config.guardar(c);
+    if (tipo === 'listasCanales') App.canales.memoria = null; // si no, la lista nueva no sale hasta "Actualizar canales"
     aviso('Agregado');
     repintar();
   }
@@ -1060,7 +1064,12 @@
       // Ajustes
       case 'alternar': {
         const x = c[d.col].find(i => i.id === d.id);
-        if (x) { x.activa = x.activa === false; App.config.guardar(c); repintar(); }
+        if (x) {
+          x.activa = x.activa === false;
+          App.config.guardar(c);
+          if (d.col === 'listasCanales') App.canales.memoria = null;
+          repintar();
+        }
         break;
       }
       case 'eliminar': {
@@ -1075,6 +1084,7 @@
         c[d.col] = c[d.col].filter(i => i.id !== d.id);
         App.datos.borrar('cache_lista_' + d.id);
         App.config.guardar(c);
+        if (d.col === 'listasCanales') App.canales.memoria = null;
         cerrarModal();
         repintar();
         break;

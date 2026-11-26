@@ -4,9 +4,12 @@ import android.annotation.SuppressLint
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
@@ -20,7 +23,9 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import org.json.JSONObject
 import java.io.ByteArrayInputStream
+import java.io.File
 
 /**
  * Pantalla principal: muestra la interfaz web que está en assets/www
@@ -33,6 +38,17 @@ class MainActivity : ComponentActivity() {
     private var vistaCompleta: View? = null
     private var callbackCompleta: WebChromeClient.CustomViewCallback? = null
     private var ultimoAtras = 0L
+
+    // La interfaz (assets/www) se intenta cargar primero desde el servidor remoto que ya
+    // tengas configurado en Ajustes → Servidor remoto (mismo que usan Jikan y los
+    // proveedores): así una actualización de app.js/nucleo.js llega con solo hacer
+    // "git push" al servidor, sin recompilar el APK. Si no hay servidor configurado, está
+    // apagado, tarda demasiado (p.ej. "cold start" de Render) o falla, se usa la copia local
+    // de siempre (assets/www) sin que se note, salvo por un par de segundos de espera.
+    private var baseRemoto: String? = null
+    private var usandoRespaldo = false
+    private val manejador = Handler(Looper.getMainLooper())
+    private val tiempoFueraRemoto = Runnable { usarRespaldoLocal() }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -78,10 +94,44 @@ class MainActivity : ComponentActivity() {
         })
 
         if (savedInstanceState == null) {
-            web.loadUrl(INICIO)
+            val remoto = urlServidorRemoto()
+            if (remoto != null) {
+                baseRemoto = remoto.removeSuffix("index.html")
+                manejador.postDelayed(tiempoFueraRemoto, 4000)
+                web.loadUrl(remoto)
+            } else {
+                web.loadUrl(INICIO)
+            }
         } else {
             web.restoreState(savedInstanceState)
         }
+    }
+
+    /** Lee la URL de "Servidor remoto" ya guardada por la app (Ajustes), directo del archivo de
+     *  configuración nativo, sin pasar por el WebView (que todavía no cargó nada). Null si no hay
+     *  servidor remoto activo o la URL no es válida: en ese caso se usa la copia local de siempre. */
+    private fun urlServidorRemoto(): String? {
+        return try {
+            val f = File(File(filesDir, "datos"), "config.json")
+            if (!f.exists()) return null
+            val sr = JSONObject(f.readText()).optJSONObject("servidorRemoto") ?: return null
+            if (!sr.optBoolean("activo", false)) return null
+            val url = sr.optString("url", "").trim()
+            if (url.isEmpty() || !(url.startsWith("http://") || url.startsWith("https://"))) return null
+            url.trimEnd('/') + "/app/index.html"
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Si el servidor remoto tarda demasiado, falla, o la página no termina de cargar, se cae a
+     *  la copia local empacada en el APK (siempre disponible, sin internet). */
+    private fun usarRespaldoLocal() {
+        if (usandoRespaldo) return
+        usandoRespaldo = true
+        manejador.removeCallbacks(tiempoFueraRemoto)
+        web.stopLoading()
+        web.loadUrl(INICIO)
     }
 
     /** Primero le pregunta a la interfaz web si puede volver atrás; si no, sale con doble toque. */
@@ -118,6 +168,7 @@ class MainActivity : ComponentActivity() {
             // Los marcos internos (iframes) navegan libremente; la página principal nunca se cambia.
             if (!request.isForMainFrame) return false
             if (url.startsWith("file:///android_asset/")) return false
+            if (baseRemoto != null && url.startsWith(baseRemoto!!)) return false
             // Cualquier otro intento de cambiar la página principal se abre fuera de la app.
             Puente.abrirFuera(this@MainActivity, Uri.parse(url))
             return true
@@ -129,6 +180,15 @@ class MainActivity : ComponentActivity() {
                 return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
             }
             return null
+        }
+
+        override fun onPageFinished(view: WebView, url: String) {
+            // Cargó algo (remoto o local): ya no hace falta el respaldo por tiempo de espera.
+            manejador.removeCallbacks(tiempoFueraRemoto)
+        }
+
+        override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+            if (request.isForMainFrame && !usandoRespaldo) usarRespaldoLocal()
         }
     }
 
