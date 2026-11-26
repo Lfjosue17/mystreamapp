@@ -695,9 +695,49 @@
       ? '<div class="lista-opciones">' + e.enlaces.map((x, j) =>
         '<button class="opcion foco" data-accion="enlace" data-ev="' + i + '" data-i="' + j + '">▶ ' + esc(x.nombre) + '<small>' + esc(x.origen || e.origen) + '</small></button>').join('') + '</div>'
       : '<p class="nota" style="padding:8px 0">Este evento no tiene enlaces en tus agendas.</p>';
+    const esTsdb = /^tsdb-/.test(e.id);
     abrirModal('<h3>' + esc(e.titulo) + '</h3><p>' + esc(e.liga) + '<br>' + esc(fecha) +
       (e.marcador ? '<br><b>' + esc(e.marcador) + '</b>' : '') + '</p>' + enlaces +
-      '<div class="acciones"><button class="btn sec foco" data-accion="buscar-canal">Canales de deportes</button>' +
+      '<div class="acciones">' +
+      (esTsdb ? '<button class="btn sec foco" data-accion="detalle-evento" data-i="' + i + '">Estadísticas</button>' : '') +
+      '<button class="btn sec foco" data-accion="buscar-canal">Canales de deportes</button>' +
+      '<button class="btn sec foco" data-accion="cerrar-modal">Cerrar</button></div>');
+  }
+
+  async function abrirDetalleEvento(i) {
+    const e = eventosActuales[i];
+    if (!e) return;
+    const idEvent = String(e.id).replace(/^tsdb-/, '');
+    abrirModal('<h3>' + esc(e.titulo) + '</h3><div class="cargando"><span></span></div>');
+    let d;
+    try { d = await App.deportes.detalleEvento(idEvent); }
+    catch (err) { d = null; }
+    if (!eventosActuales[i] || eventosActuales[i] !== e) return; // el usuario cambió de pantalla mientras cargaba
+    if (!d) {
+      abrirModal('<h3>' + esc(e.titulo) + '</h3><p class="nota error-txt">No se pudo cargar el detalle.</p>' +
+        '<div class="acciones"><button class="btn sec foco" data-accion="evento" data-i="' + i + '">Volver</button>' +
+        '<button class="btn sec foco" data-accion="cerrar-modal">Cerrar</button></div>');
+      return;
+    }
+    const sede = [d.sede, d.ciudad].filter(Boolean).join(', ');
+    const marcador = d.marcador || e.marcador || '';
+    const cab = '<h3>' + esc(e.titulo) + '</h3><p>' + esc(e.liga) +
+      (d.estado ? ' · ' + esc(d.estado) : '') + (sede ? '<br>' + esc(sede) : '') +
+      (marcador ? '<br><b>' + esc(marcador) + '</b>' : '') + '</p>';
+    let linea;
+    if (d.linea.length) {
+      linea = '<h4 class="seccion-titulo" style="margin-top:4px">Goles y tarjetas</h4><div class="lista-opciones">' +
+        d.linea.map(x => {
+          const icono = x.esGol ? '⚽' : x.esRoja ? '🟥' : x.esTarjeta ? '🟨' : x.esCambio ? '🔁' : '•';
+          const quien = [x.jugador, x.equipo].filter(Boolean).join(' · ');
+          return '<div class="opcion" style="cursor:default">' + icono + ' ' + esc(x.minuto) + ' ' +
+            esc(quien || x.tipo) + (x.asistencia ? '<small>Asistencia: ' + esc(x.asistencia) + '</small>' : '') + '</div>';
+        }).join('') + '</div>';
+    } else {
+      linea = '<p class="nota" style="padding:8px 0">TheSportsDB no tiene línea de tiempo para este evento.</p>';
+    }
+    abrirModal(cab + linea +
+      '<div class="acciones"><button class="btn sec foco" data-accion="evento" data-i="' + i + '">Volver</button>' +
       '<button class="btn sec foco" data-accion="cerrar-modal">Cerrar</button></div>');
   }
 
@@ -985,6 +1025,7 @@
       case 'dia': p.dia = Number(d.v); pintar(false); break;
       case 'deporte': p.deporte = d.v; pintar(false); break;
       case 'evento': abrirEvento(Number(d.i)); break;
+      case 'detalle-evento': abrirDetalleEvento(Number(d.i)); break;
       case 'enlace': {
         const ev = eventosActuales[Number(d.ev)];
         const x = ev && ev.enlaces[Number(d.i)];

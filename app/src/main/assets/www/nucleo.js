@@ -446,9 +446,51 @@ window.App = window.App || {};
     return App.normalizar(b.titulo) === App.normalizar(a.titulo);
   }
 
+  /** Normaliza una entrada de lookuptimeline.php (los nombres de campo varían según el tipo de evento). */
+  function lineaTiempo(x) {
+    const minuto = x.intTime || x.strTime || x.intMinute || '';
+    const tipo = x.strTimeline || x.strEvent || x.strTimelineDetail || 'Evento';
+    return {
+      minuto: minuto ? (String(minuto).replace(/\D+$/, '') + "'") : '',
+      min: parseInt(minuto, 10) || 0,
+      equipo: x.strTeam || x.strHomeAway || '',
+      jugador: x.strPlayer || '',
+      tipo,
+      asistencia: x.strAssist || x.strAssistPlayer || '',
+      esGol: /gol|goal/i.test(tipo),
+      esTarjeta: /tarjeta|card/i.test(tipo),
+      esRoja: /roja|red/i.test(tipo),
+      esCambio: /cambio|sub/i.test(tipo)
+    };
+  }
+
   App.deportes = {
     LISTA: Object.keys(DEPORTES),
     limpiarCache() { cacheAgendas.clear(); },
+    /** Detalle de un evento de TheSportsDB: estado/marcador/sede + línea de tiempo (goles/tarjetas), si existe. */
+    async detalleEvento(idEvent) {
+      const c = App.config.obtener();
+      const clave = encodeURIComponent((c.sportsdbKey || '123').trim());
+      const base = 'https://www.thesportsdb.com/api/v1/json/' + clave + '/';
+      const [evRes, tlRes] = await Promise.all([
+        App.red.json(base + 'lookupevent.php?id=' + encodeURIComponent(idEvent)).catch(() => ({ events: null })),
+        App.red.json(base + 'lookuptimeline.php?id=' + encodeURIComponent(idEvent)).catch(() => ({ timeline: null }))
+      ]);
+      const ev = (evRes && evRes.events && evRes.events[0]) || null;
+      const linea = ((tlRes && tlRes.timeline) || [])
+        .map(lineaTiempo)
+        .sort((a, b) => a.min - b.min);
+      return {
+        estado: ev ? (ev.strStatus || '') : '',
+        sede: ev ? (ev.strVenue || '') : '',
+        ciudad: ev ? (ev.strCity || '') : '',
+        marcador: ev && ev.intHomeScore !== null && ev.intHomeScore !== undefined && ev.intHomeScore !== ''
+          ? ev.intHomeScore + ' - ' + ev.intAwayScore : '',
+        local: ev ? (ev.strHomeTeam || '') : '',
+        visita: ev ? (ev.strAwayTeam || '') : '',
+        linea
+      };
+    },
     async eventosDelDia(fecha, deporte) {
       const errores = [];
       const [api, propios] = await Promise.all([

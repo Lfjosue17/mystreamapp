@@ -1,5 +1,19 @@
 # Cambios
 
+## [0.6.0] - 2026-11-26
+
+### Agregado
+- Deportes: botón **Estadísticas** en los eventos que vienen de TheSportsDB (liga, estado, sede, marcador
+  y línea de tiempo de goles/tarjetas con minuto y jugador), usando solo `lookupevent.php`/`lookuptimeline.php`
+  con la clave gratis sin registro. No incluye el gráfico de posesión/ataques en vivo (eso es de la API
+  de pago de TheSportsDB o de otros servicios que piden registro, y no se quiso usar ninguno de pago).
+  Los eventos que solo vienen de tus agendas propias (sin ID de TheSportsDB) no muestran este botón.
+
+## [0.5.1] - 2026-11-26
+
+### Arreglado
+- `ClienteEmbed.kt`: `readTimeout` de 20s a 25s, para que empareje con el nuevo tope de 15s por proveedor del servidor (mystream-api v1.9.1) y no corte la respuesta antes de que el servidor termine de juntar todos los proveedores.
+
 ## [0.5.0] - 2026-11-26
 
 ### Agregado

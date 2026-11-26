@@ -40,7 +40,7 @@ class ClienteEmbed(
         val q = if (tipo == "series") "?season=${info.temporada}&episode=${info.episodio}" else ""
         val conexion = (URL("$base/api/streams/$tipo/$id$q").openConnection() as HttpURLConnection).apply {
             connectTimeout = 10_000
-            readTimeout = 20_000
+            readTimeout = 25_000
             setRequestProperty("X-API-Key", apiKey)
             setRequestProperty("Accept", "application/json")
         }

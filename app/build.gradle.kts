@@ -34,8 +34,8 @@ android {
         applicationId = "com.mystreamapp.app"
         minSdk = 30
         targetSdk = 37
-        versionCode = 4
-        versionName = "0.5.0"
+        versionCode = 6
+        versionName = "0.6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
