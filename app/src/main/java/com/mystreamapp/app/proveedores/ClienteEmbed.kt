@@ -73,7 +73,8 @@ class ClienteEmbed(
                 headers = cabeceras,
                 language = idioma,
                 subtitles = subtitulado,
-                score = puntajeIdioma(idioma, subtitulado).toDouble()
+                score = puntajeIdioma(idioma, subtitulado).toDouble(),
+                quality = o.optString("quality")
             )
         }
     }

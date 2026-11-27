@@ -488,11 +488,25 @@
         season: info.temporada || 1, episode: info.episodio || 1, title: info.titulo || '', type: categoria
       };
       const respuestas = await App.proveedores.buscarCategoria(categoria, parametros);
-      respuestas.forEach(f => directas.push({
-        _direct: true, nombre: f.providerName + ' · ' + (f.language || 'Idioma no identificado'),
-        url: f.url, headers: f.headers || {}, language: f.language, subtitles: !!f.subtitles,
-        subtitleUrl: f.subtitleUrl || '', score: Number(f.score || 0)
-      }));
+      const vistos = new Set();
+      respuestas.forEach(f => {
+        // Si el proveedor trae calidad (f.quality, ej. "1080") o viene en el título
+        // (ej. "Vidlink - 1080p"), se agrega a la etiqueta: si no, varias opciones del
+        // mismo proveedor con distinto idioma "no identificado" se ven como si fueran
+        // la misma, aunque sean enlaces distintos.
+        const calidad = f.quality || (f.title && /(\d{3,4}p|4k)/i.exec(f.title) || [])[1] || '';
+        const item = {
+          _direct: true,
+          nombre: f.providerName + (calidad ? ' [' + calidad + ']' : '') + ' · ' + (f.language || 'Idioma no identificado'),
+          url: f.url, headers: f.headers || {}, language: f.language, subtitles: !!f.subtitles,
+          subtitleUrl: f.subtitleUrl || '', score: Number(f.score || 0)
+        };
+        // Evita listar dos veces el mismo enlace exacto (algunos proveedores lo repiten).
+        const clave = item.url || item.nombre;
+        if (vistos.has(clave)) return;
+        vistos.add(clave);
+        directas.push(item);
+      });
       directas.sort((a, b) => b.score - a.score);
     }
     const opciones = directas.concat(plantillas);
@@ -543,16 +557,22 @@
     if (p.q) { await buscarAnime(p, t); return; }
     const cab = '<div class="cabecera"><label class="campo-busqueda">' + ICONO_LUPA +
       '<input id="q-anime" type="search" placeholder="Buscar anime…" autocomplete="off"></label></div>';
-    const temporada = await App.jikan.get('/seasons/now', { limit: 20, sfw: 'true' });
     const vacioR = { data: [] };
-    const [top, mejores] = await Promise.all([
+    const [temporada, top, mejores] = await Promise.all([
+      App.jikan.get('/seasons/now', { limit: 20, sfw: 'true' }).catch(() => vacioR),
       App.jikan.get('/top/anime', { filter: 'airing', limit: 20, sfw: 'true' }).catch(() => vacioR),
       App.jikan.get('/top/anime', { limit: 20, sfw: 'true' }).catch(() => vacioR)
     ]);
-    if (!poner(t, cab +
-      filaAnime('Temporada actual', temporada.data) +
-      filaAnime('Al aire ahora', top.data) +
-      filaAnime('Mejor valorados', mejores.data))) return;
+    const filas = filaAnime('Temporada actual', temporada.data) +
+      filaAnime('Al aire ahora', top.data) + filaAnime('Mejor valorados', mejores.data);
+    // Si Jikan (la fuente del catálogo de anime) no respondió por ningún camino, se avisa
+    // en vez de dejar las tres filas en blanco sin explicación o tumbar toda la pantalla.
+    const sinNada = !filas;
+    if (!poner(t, cab + (sinNada
+      ? vacio('No se pudo cargar el catálogo de anime', 'Jikan (la fuente de datos de anime) no respondió. Puede ser tu conexión o que esté caído del otro lado.',
+          '<button class="btn foco" data-accion="recargar">Reintentar</button>')
+      : filas))) return;
+    if (sinNada) return;
     const input = $('#q-anime');
     let espera;
     input.addEventListener('input', () => {
@@ -565,11 +585,15 @@
   async function buscarAnime(p, t) {
     const cab = '<div class="cabecera"><label class="campo-busqueda">' + ICONO_LUPA +
       '<input id="q-anime" type="search" placeholder="Buscar anime…" autocomplete="off" value="' + esc(p.q) + '"></label></div>';
-    const r = await App.jikan.get('/anime', { q: p.q, limit: 24, sfw: 'true', order_by: 'members', sort: 'desc' });
+    const r = await App.jikan.get('/anime', { q: p.q, limit: 24, sfw: 'true', order_by: 'members', sort: 'desc' })
+      .catch(e => ({ data: [], _error: e }));
     const html = (r.data || []).map(tarjetaAnime).join('');
     if (!poner(t, cab + (html
       ? '<p class="nota">Resultados para “' + esc(p.q) + '”</p><div class="rejilla">' + html + '</div>'
-      : vacio('Sin resultados', 'Prueba con otro nombre.')))) return;
+      : r._error
+        ? vacio('No se pudo buscar', 'Jikan no respondió. Puede ser tu conexión o que esté caído del otro lado.',
+            '<button class="btn foco" data-accion="recargar">Reintentar</button>')
+        : vacio('Sin resultados', 'Prueba con otro nombre.')))) return;
     const input = $('#q-anime');
     let espera;
     input.addEventListener('input', () => {

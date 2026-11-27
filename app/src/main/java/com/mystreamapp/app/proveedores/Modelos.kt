@@ -39,7 +39,10 @@ data class ResultadoProveedor(
     val subtitles: Boolean = false,
     val score: Double = 0.0,
     /** URL de un .vtt/.srt visto por el Sniffer mientras buscaba el video (vacío si no vio ninguno). */
-    val subtitleUrl: String = ""
+    val subtitleUrl: String = "",
+    /** Calidad del enlace si el proveedor la informa (ej. "1080", "4k"). Sin esto, dos
+     *  enlaces del mismo proveedor en distinta calidad se ven idénticos en "Elige una fuente". */
+    val quality: String = ""
 )
 
 /**

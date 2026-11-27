@@ -1,5 +1,16 @@
 # Cambios
 
+## [0.7.1] - 2026-11-27
+
+### Arreglado
+- Anime: si Jikan (la fuente del catálogo) no responde, ya no se rompe toda la pantalla con un error
+  genérico — ahora avisa claro y deja reintentar, solo en la parte que falló.
+- "Elige una fuente" (películas/series): varias opciones del mismo proveedor (ej. Vidlink, 4KHDHub) se
+  veían idénticas ("Idioma no identificado" repetido) porque el puente nativo descartaba el dato de
+  calidad del enlace antes de llegar a la pantalla. Ahora viaja completo y se muestra (ej. "Vidlink
+  [1080] · Idioma no identificado"), y además se filtra cualquier enlace exactamente repetido.
+  Afecta: `proveedores/Modelos.kt`, `proveedores/ClienteEmbed.kt`, `Puente.kt`.
+
 ## [0.7.0] - 2026-11-26
 
 ### Agregado

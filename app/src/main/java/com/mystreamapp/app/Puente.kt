@@ -281,6 +281,7 @@ class Puente(private val act: Activity, private val web: WebView) {
                     put("subtitles", r.subtitles)
                     put("subtitleUrl", r.subtitleUrl)
                     put("score", r.score)
+                    put("quality", r.quality)
                 }
             )
         }
